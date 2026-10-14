@@ -105,8 +105,16 @@ class BigIP:
 
     def download(self, name, dest):
         url = self.base + "/mgmt/shared/file-transfer/ucs-downloads/" + name
-        start, total = 0, None
         tmp = dest + ".part"
+        try:
+            return self._download_chunks(url, tmp, dest)
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)  # never leave partial files behind
+            raise
+
+    def _download_chunks(self, url, tmp, dest):
+        start, total = 0, None
         with open(tmp, "wb") as f:
             os.chmod(tmp, 0o600)
             while total is None or start < total:
@@ -129,7 +137,7 @@ class BigIP:
                 f.write(r.content)
                 start += len(r.content)
         size = os.path.getsize(tmp)
-        if size != total:
+        if size == 0 or size != total:
             raise RuntimeError("Size mismatch: got {} of {} bytes".format(size, total))
         os.rename(tmp, dest)
         return size
@@ -183,22 +191,27 @@ class F5OS:
         # Same form post the webUI uses; the token goes in the form body
         url = self.base + "/f5-utils-file-transfer:file/f5-file-download:download-file/f5-file-download:start-download"
         tmp = dest + ".part"
-        with self.s.post(url, timeout=120, stream=True,
-                         headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "*/*"},
-                         data={"file-name": name, "file-path": self.path, "token": self.token}) as r:
-            r.raise_for_status()
-            with open(tmp, "wb") as f:
-                os.chmod(tmp, 0o600)
-                for chunk in r.iter_content(65536):
-                    f.write(chunk)
-        size = os.path.getsize(tmp)
-        with open(tmp, "rb") as f:
-            head = f.read(200).lstrip()
-        if size == 0 or head.startswith(b"{"):  # empty file or a JSON error instead of XML
-            os.remove(tmp)
-            raise RuntimeError("Download failed: {}".format(head.decode(errors="replace")))
-        os.rename(tmp, dest)
-        return size
+        try:
+            with self.s.post(url, timeout=120, stream=True,
+                             headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "*/*"},
+                             data={"file-name": name, "file-path": self.path, "token": self.token}) as r:
+                r.raise_for_status()
+                with open(tmp, "wb") as f:
+                    os.chmod(tmp, 0o600)
+                    for chunk in r.iter_content(65536):
+                        f.write(chunk)
+            size = os.path.getsize(tmp)
+            with open(tmp, "rb") as f:
+                head = f.read(200).lstrip()
+            # Expect XML: reject empty files, JSON errors and HTML error/login pages
+            if size == 0 or not head.startswith(b"<") or head[:20].lower().startswith((b"<!doctype", b"<html")):
+                raise RuntimeError("Download is not a config backup: {!r}".format(head[:80]))
+            os.rename(tmp, dest)
+            return size
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)  # never leave partial files behind
+            raise
 
     def delete(self, name):
         r = self.s.post(self.base + "/f5-utils-file-transfer:file/delete",
