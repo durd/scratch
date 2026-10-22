@@ -1,0 +1,133 @@
+# Scratch
+
+A small collection of network automation scripts for common operations on Cisco Catalyst Center and F5 devices.
+
+This repository is a personal scratch space for utilities that are quick to use, focused on specific operational tasks, and designed to be run directly from a shell.
+
+## Included scripts
+
+### `f5_ucs_backup.py`
+Backs up BIG-IP / TMOS UCS archives and F5OS config database snapshots using the device REST APIs.
+
+Features:
+- Supports both TMOS and F5OS devices
+- Reads credentials from environment variables or prompts interactively
+- Optionally encrypts TMOS UCS backups
+- Keeps local and/or device-side backups based on retention settings
+- Supports host lists from CLI arguments or a file
+- Works with certificate verification override via `--insecure`
+
+Example:
+
+```bash
+./f5_ucs_backup.py bigip01 f5os:rseries01 -o /backup/f5
+./f5_ucs_backup.py -f hosts.txt -o /backup/f5 --encrypt -k 14 -d 1 --insecure
+```
+
+Required environment variables:
+
+```bash
+export F5_USER="myuser"
+export F5_PASSWORD="mypassword"
+export F5_UCS_PASSPHRASE="secret"   # only for --encrypt on TMOS
+```
+
+---
+
+### `cc_deploy_template.py`
+Deploys a single Day-N template to Catalyst Center managed devices or site scopes.
+
+Features:
+- Target devices individually with `--device`
+- Target all devices under a site with `--site`
+- Optionally recurse below a site path with `--recursive`
+- Filter by device family with `--family`
+- Apply per-device parameter overrides from JSON
+- Supports dry-run and confirmation prompts
+- Waits for task and deployment status completion
+
+Example:
+
+```bash
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Fix-NTP" \
+  --device 10.1.1.10 \
+  --device sw02 \
+  --param ntp_server=10.0.0.1
+
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Fix-NTP" \
+  --site "Global/Area/Building" \
+  --family switch \
+  --dry-run
+```
+
+Required environment variables:
+
+```bash
+export CC_USER="myuser"
+export CC_PASS="mypassword"
+```
+
+---
+
+### `catc_backup_cleanup.py`
+Deletes old Catalyst Center backup artifacts.
+
+This script supports two modes:
+
+1. `storage` mode
+   - Runs directly against the NFS/SFTP backup share
+   - Deletes backup-id folders older than a configured number of days
+   - Useful when the physical appliance does not expose a delete API
+
+2. `api` mode
+   - Uses the Catalyst Center REST API to identify and delete old backups
+   - Best for deployments where the backup API is available
+
+Examples:
+
+```bash
+./catc_backup_cleanup.py storage \
+  --backup-root /mnt/backup-share \
+  --days 30 \
+  --apply
+
+./catc_backup_cleanup.py api \
+  --host https://catc.example.com \
+  --username admin \
+  --days 30 \
+  --apply
+```
+
+---
+
+## Repository structure
+
+```text
+.
+├── catc_backup_cleanup.py
+├── cc_deploy_template.py
+├── f5_ucs_backup.py
+└── README.md
+```
+
+## Notes
+
+- These scripts are intentionally lightweight and operationally focused.
+- They assume direct access to target systems and standard Linux/macOS shell execution.
+- Some scripts expect Python 3.6+ and the `requests` package.
+
+## Requirements
+
+Install dependencies with:
+
+```bash
+pip install requests
+```
+
+## License
+
+No explicit license has been set for this repository.
