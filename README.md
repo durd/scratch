@@ -45,6 +45,12 @@ Features:
 - Apply per-device parameter overrides from JSON
 - Supports dry-run and confirmation prompts
 - Waits for task and deployment status completion
+- Optionally writes the deployed config to device memory with `--save`
+
+Template notes:
+- This script is intended for a template that is already committed in Catalyst Center.
+- The template does not need any device series/models or network profiles attached to it to be deployed by this script.
+- Device family filtering is optional and is only used to narrow the target set when needed.
 
 Example:
 
@@ -61,6 +67,7 @@ Example:
   --template "Fix-NTP" \
   --site "Global/Area/Building" \
   --family switch \
+  --save \
   --dry-run
 ```
 
