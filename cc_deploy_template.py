@@ -212,7 +212,12 @@ def report_progress(progress, devices):
 
     if not skipped and not m:
         print(f"Task done: {progress}")
-        return
+        return []
+
+    # Devices named after "Hence not deploying on devices:" were skipped too
+    for part in re.findall(r"Hence not deploying on devices:\s*(\[[^\]]*\]|[0-9a-f\-, ]*)", progress):
+        for uuid in UUID_RE.findall(part):
+            skipped.setdefault(uuid, "not deployed")
 
     print(f"\nPassed CC's target check, {len(applicable)} device(s):")
     for uuid in applicable:
@@ -228,8 +233,24 @@ def report_progress(progress, devices):
             "Hence not deploying"):
         hint = " Use --force to push again." if "already deployed" in progress else ""
         print(f"\nResult: nothing was deployed.{hint}")
+        return []
     else:
         print("\nResult: deploy started for the devices above. Check Deployment History in CC.")
+        return [u for u in applicable if u not in skipped]
+
+
+def save_config(cc, ids, devices, timeout):
+    """Write memory on the given devices via CC."""
+    if not ids:
+        print("\nNothing deployed, so nothing to save.")
+        return
+    print(f"\nSaving config (write memory) on {len(ids)} device(s)...")
+    resp = cc.post("/dna/intent/api/v1/network-device-config/write-memory", {"deviceId": ids})
+    task = wait_task(cc, resp["response"]["taskId"], timeout)
+    for uuid in ids:
+        d = devices.get(uuid, {})
+        print(f"  {d.get('hostname', uuid)}")
+    print(f"Save task done: {task.get('progress')}")
 
 
 def wait_task(cc, task_id, timeout):
@@ -285,6 +306,11 @@ def main():
     p.add_argument("--params-file", help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
+    p.add_argument("--save", action="store_true",
+                   help="Write memory on devices CC deployed to")
+    p.add_argument("--save-wait", type=int, default=60,
+                   help="Seconds to wait before saving when deploy completion can't be "
+                        "confirmed (default 60)")
     p.add_argument("--yes", action="store_true", help="Don't ask for confirmation")
     p.add_argument("--insecure", action="store_true", help="Skip TLS verification")
     p.add_argument("--timeout", type=int, default=600, help="Seconds to wait (default 600)")
@@ -385,17 +411,28 @@ def main():
     text = re.sub(r"\[[^\]]*\]|\{[^}]*\}", "", f"{progress} {task.get('data', '')}")
     known = {template_id, version_id, *devices}
     candidates = [u for u in UUID_RE.findall(text) if u not in known]
-    if not candidates:
-        report_progress(progress, devices)
-        return
+    deployed = None
+    if candidates:
+        status = wait_deployment(cc, candidates[0], args.timeout)
+        if status is not None:
+            print(f"Deployment status: {status.get('status')}")
+            deployed = []
+            for dev in status.get("devices", []):
+                print(f"  {dev.get('name')}: {dev.get('status')} "
+                      f"{dev.get('detailedStatusMessage', '')}")
+                if dev.get("status") == "SUCCESS" and dev.get("deviceId"):
+                    deployed.append(dev["deviceId"])
 
-    status = wait_deployment(cc, candidates[0], args.timeout)
-    if status is None:
-        report_progress(progress, devices)
-        return
-    print(f"Deployment status: {status.get('status')}")
-    for dev in status.get("devices", []):
-        print(f"  {dev.get('name')}: {dev.get('status')} {dev.get('detailedStatusMessage', '')}")
+    if deployed is None:
+        deployed = report_progress(progress, devices)
+        if deployed and args.save:
+            # CC's task ends when the deploy is handed off, not when devices are done
+            print(f"\nCan't confirm the deploy has finished, waiting {args.save_wait}s "
+                  "before saving...")
+            time.sleep(args.save_wait)
+
+    if args.save:
+        save_config(cc, deployed, devices, args.timeout)
 
 
 if __name__ == "__main__":
