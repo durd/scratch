@@ -181,6 +181,20 @@ def device_records(cc, ids):
     return records
 
 
+def print_table(rows, headers):
+    """Print rows as an indented table, each column as wide as its longest value."""
+    rows = [["" if v is None else str(v) for v in row] for row in rows]
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+
+    def line(cells):
+        return "  " + "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
+
+    print(line(headers))
+    print(line(["-" * w for w in widths]))
+    for row in rows:
+        print(line(row))
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -374,18 +388,20 @@ def main():
         if skipped:
             print(f"\nSkipping {len(skipped)} device(s) not reachable in CC "
                   "(use --include-unreachable to include them):")
-            for d in skipped:
-                print(f"  {d.get('hostname')}  {d.get('managementIpAddress')}  "
-                      f"{d.get('reachabilityStatus')}")
+            print_table([[d.get("hostname"), d.get("managementIpAddress"),
+                          d.get("reachabilityStatus")]
+                         for d in sorted(skipped, key=lambda d: d.get("hostname") or "")],
+                        ["Hostname", "Management IP", "Reachability"])
             devices = {k: d for k, d in devices.items() if d.get("reachabilityStatus") == "Reachable"}
 
     if not devices:
         sys.exit("No devices to deploy to")
 
     print(f"\n{len(devices)} target device(s):")
-    for d in sorted(devices.values(), key=lambda d: d.get("hostname") or ""):
-        print(f"  {d.get('hostname')}  {d.get('managementIpAddress')}  {d.get('family')}  "
-              f"{d.get('role') or 'no role'}")
+    print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
+                  d.get("role") or "no role"]
+                 for d in sorted(devices.values(), key=lambda d: d.get("hostname") or "")],
+                ["Hostname", "Management IP", "Family", "Role"])
 
     common = parse_kv(args.param)
     per_device = {}
