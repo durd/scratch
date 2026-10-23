@@ -13,6 +13,8 @@ script deletes any such UUID folder older than --days, in any service dir.
 
 For the legacy API-based approach (works on ESXi VA / newer releases that
 do have the backup API), see the --host/--username API mode below.
+
+Needs Python 3.12.13+ and `requests`.
 """
 
 import argparse
@@ -20,13 +22,18 @@ import base64
 import getpass
 import re
 import shutil
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+import urllib3
 
-requests.packages.urllib3.disable_warnings()
+if sys.version_info < (3, 12, 13):
+    sys.exit(f"Needs Python 3.12.13 or newer, this is {sys.version.split()[0]}")
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE

@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*~
+
+# AI coding tools: per-user files only. Shared instructions (AGENTS.md,
+# CLAUDE.md, .cursor/rules, ...) stay tracked.
+.claude/settings.local.json
+CLAUDE.local.md
+.aider*
+!.aider.conf.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Script output: backups, partial downloads, host lists
+*.ucs
+*.part
+hosts.txt

@@ -45,7 +45,7 @@ Features:
 - Apply per-device parameter overrides from JSON
 - Supports dry-run and confirmation prompts
 - Waits for task and deployment status completion
-- Optionally writes the deployed config to device memory with `--save`
+- Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
 
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
@@ -67,7 +67,6 @@ Example:
   --template "Fix-NTP" \
   --site "Global/Area/Building" \
   --family switch \
-  --save \
   --dry-run
 ```
 
@@ -118,6 +117,8 @@ Examples:
 ├── catc_backup_cleanup.py
 ├── cc_deploy_template.py
 ├── f5_ucs_backup.py
+├── requirements.txt
+├── AGENTS.md
 └── README.md
 ```
 
@@ -125,15 +126,21 @@ Examples:
 
 - These scripts are intentionally lightweight and operationally focused.
 - They assume direct access to target systems and standard Linux/macOS shell execution.
-- Some scripts expect Python 3.6+ and the `requests` package.
+- All scripts need Python 3.12.13+ and the packages in `requirements.txt`. They exit with a clear message on older Pythons.
 
 ## Requirements
 
-Install dependencies with:
+Python 3.12.13 or newer. Set up a virtual environment in `venv/` (ignored by git):
 
 ```bash
-pip install requests
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
 ```
+
+Run the scripts with the venv's Python, e.g. `venv/bin/python f5_ucs_backup.py ...`,
+or `source venv/bin/activate` first. On hosts where `python3` is older than 3.12.13
+(RHEL 8's system Python is 3.6), create the venv with a newer interpreter,
+e.g. `python3.12 -m venv venv`.
 
 ## License
 

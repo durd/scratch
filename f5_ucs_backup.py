@@ -4,7 +4,7 @@ Back up F5 devices via their REST APIs (HTTPS/443 only):
   - BIG-IP / TMOS:  UCS archive          (iControl REST)
   - F5OS (rSeries): config database XML  (F5OS API, /api on 443)
 
-Works with Python 3.6+ and needs only `requests` (RHEL 8: dnf install python3-requests).
+Needs Python 3.12.13+ and `requests`.
 
 Hosts (arguments or -f file, one per line, # for comments):
   bigip01            TMOS (default when no prefix)
@@ -29,6 +29,10 @@ import sys
 import time
 
 import requests
+import urllib3
+
+if sys.version_info < (3, 12, 13):
+    sys.exit(f"Needs Python 3.12.13 or newer, this is {sys.version.split()[0]}")
 
 CHUNK = 1024 * 1024          # 1 MB, iControl REST max chunk size
 TASK_TIMEOUT = 30 * 60       # seconds to wait for UCS creation
@@ -38,7 +42,7 @@ TYPES = ("tmos", "f5os")
 
 def log(host, msg, stream=None):
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print("{} [{}] {}".format(ts, host, msg), file=stream or sys.stdout, flush=True)
+    print(f"{ts} [{host}] {msg}", file=stream or sys.stdout, flush=True)
 
 
 def safe(host):
@@ -51,7 +55,7 @@ class BigIP:
 
     def __init__(self, host, user, password, verify):
         self.host = host
-        self.base = "https://{}".format(host)
+        self.base = f"https://{host}"
         self.s = requests.Session()
         self.s.verify = verify
         self.s.headers["Content-Type"] = "application/json"
@@ -85,14 +89,14 @@ class BigIP:
         task_id = r.json()["_taskId"]
 
         # A task does nothing until it is set to VALIDATING
-        r = self.s.put("{}/{}".format(url, task_id), json={"_taskState": "VALIDATING"}, timeout=60)
+        r = self.s.put(f"{url}/{task_id}", json={"_taskState": "VALIDATING"}, timeout=60)
         r.raise_for_status()
 
         deadline = time.time() + TASK_TIMEOUT
         while time.time() < deadline:
             time.sleep(POLL_INTERVAL)
             try:
-                r = self.s.get("{}/{}".format(url, task_id), timeout=60)
+                r = self.s.get(f"{url}/{task_id}", timeout=60)
                 r.raise_for_status()
             except requests.RequestException:
                 continue  # restjavad can be briefly unresponsive during save
@@ -100,8 +104,8 @@ class BigIP:
             if state == "COMPLETED":
                 return
             if state == "FAILED":
-                raise RuntimeError("UCS task failed: {}".format(r.text))
-        raise RuntimeError("UCS task timed out after {}s".format(TASK_TIMEOUT))
+                raise RuntimeError(f"UCS task failed: {r.text}")
+        raise RuntimeError(f"UCS task timed out after {TASK_TIMEOUT}s")
 
     def download(self, name, dest):
         url = self.base + "/mgmt/shared/file-transfer/ucs-downloads/" + name
@@ -123,7 +127,7 @@ class BigIP:
                     end = min(end, total - 1)
                 headers = {
                     "Content-Type": "application/octet-stream",
-                    "Content-Range": "{}-{}/{}".format(start, end, total or 0),
+                    "Content-Range": f"{start}-{end}/{total or 0}",
                 }
                 r = self.s.get(url, headers=headers, timeout=120)
                 r.raise_for_status()
@@ -133,12 +137,12 @@ class BigIP:
                     raise RuntimeError("No Content-Range in response")
                 total = int(cr.split("/")[1])
                 if not r.content:
-                    raise RuntimeError("Empty chunk at offset {}".format(start))
+                    raise RuntimeError(f"Empty chunk at offset {start}")
                 f.write(r.content)
                 start += len(r.content)
         size = os.path.getsize(tmp)
         if size == 0 or size != total:
-            raise RuntimeError("Size mismatch: got {} of {} bytes".format(size, total))
+            raise RuntimeError(f"Size mismatch: got {size} of {total} bytes")
         os.rename(tmp, dest)
         return size
 
@@ -165,7 +169,7 @@ class F5OS:
 
     def __init__(self, host, user, password, verify):
         self.host = host
-        self.base = "https://{}/api/data".format(host)
+        self.base = f"https://{host}/api/data"
         self.s = requests.Session()
         self.s.verify = verify
         self.s.headers["Content-Type"] = "application/yang-data+json"
@@ -205,7 +209,7 @@ class F5OS:
                 head = f.read(200).lstrip()
             # Expect XML: reject empty files, JSON errors and HTML error/login pages
             if size == 0 or not head.startswith(b"<") or head[:20].lower().startswith((b"<!doctype", b"<html")):
-                raise RuntimeError("Download is not a config backup: {!r}".format(head[:80]))
+                raise RuntimeError(f"Download is not a config backup: {head[:80]!r}")
             os.rename(tmp, dest)
             return size
         except Exception:
@@ -234,20 +238,20 @@ DRIVERS = {"tmos": BigIP, "f5os": F5OS}
 # --------------------------------------------------------------------------- common
 def own_archives(host, names, ext):
     """Backups created by this script for this host, oldest first."""
-    pattern = re.compile(r"^{}_\d{{8}}-\d{{6}}{}$".format(re.escape(safe(host)), re.escape(ext)))
+    pattern = re.compile(rf"^{re.escape(safe(host))}_\d{{8}}-\d{{6}}{re.escape(ext)}$")
     return sorted(n for n in names if pattern.match(n))  # timestamp sorts by name
 
 
 def prune_local(host, outdir, keep, ext):
     for old in own_archives(host, os.listdir(outdir), ext)[:-keep]:
         os.remove(os.path.join(outdir, old))
-        log(host, "pruned local {}".format(old))
+        log(host, f"pruned local {old}")
 
 
 def prune_device(dev, keep):
     for old in own_archives(dev.host, dev.list(), dev.ext)[:-keep]:
         dev.delete(old)
-        log(dev.host, "pruned on device {}".format(old))
+        log(dev.host, f"pruned on device {old}")
 
 
 def parse_host(line):
@@ -260,14 +264,14 @@ def parse_host(line):
         return kind, host
     if line.count(":") > 1:  # bare IPv6 address
         return "tmos", line
-    raise ValueError("unknown device type '{}' in '{}' (use {})".format(
-        m.group(1), line, " or ".join(TYPES)))
+    raise ValueError(f"unknown device type '{m.group(1)}' in '{line}' "
+                     f"(use {' or '.join(TYPES)})")
 
 
 def backup(kind, host, args, user, password, passphrase):
     driver = DRIVERS[kind]
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    name = "{}_{}{}".format(safe(host), stamp, driver.ext)
+    name = f"{safe(host)}_{stamp}{driver.ext}"
     dest = os.path.join(args.outdir, name)
 
     dev = driver(host, user, password, args.verify)
@@ -275,11 +279,11 @@ def backup(kind, host, args, user, password, passphrase):
         if kind == "f5os" and passphrase:
             log(host, "note: --encrypt does not apply to F5OS (secrets use the primary key)")
             passphrase = None
-        log(host, "{}: creating {}{}".format(kind, name, " (encrypted)" if passphrase else ""))
+        log(host, f"{kind}: creating {name}{' (encrypted)' if passphrase else ''}")
         dev.create(name, passphrase)
         log(host, "downloading")
         size = dev.download(name, dest)
-        log(host, "saved {} ({:.1f} MB)".format(dest, size / 1048576))
+        log(host, f"saved {dest} ({size / 1048576:.1f} MB)")
         if args.keep:
             prune_local(host, args.outdir, args.keep, driver.ext)
         if args.device_keep:
@@ -321,14 +325,14 @@ def main():
 
     args.verify = args.ca_bundle if args.ca_bundle else not args.insecure
     if args.insecure:
-        requests.packages.urllib3.disable_warnings()
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def secret(var, prompt, hidden=True):
         val = os.environ.get(var)
         if val:
             return val
         if not sys.stdin.isatty():  # cron etc.: never prompt
-            p.error("{} is not set and there is no terminal to prompt on".format(var))
+            p.error(f"{var} is not set and there is no terminal to prompt on")
         return getpass.getpass(prompt) if hidden else input(prompt)
 
     user = secret("F5_USER", "Username: ", hidden=False)
@@ -347,11 +351,11 @@ def main():
         try:
             backup(kind, host, args, user, password, passphrase)
         except Exception as e:  # keep going with the other devices
-            log(host, "FAILED: {}".format(e))
+            log(host, f"FAILED: {e}")
             failed.append(host)
 
     if failed:
-        log("summary", "FAILED: {}".format(", ".join(failed)), sys.stderr)
+        log("summary", f"FAILED: {', '.join(failed)}", sys.stderr)
         sys.exit(1)
 
 
