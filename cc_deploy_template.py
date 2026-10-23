@@ -306,8 +306,12 @@ def main():
     p.add_argument("--params-file", help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
-    p.add_argument("--save", action="store_true",
-                   help="Write memory on devices CC deployed to")
+    p.add_argument("--no-save", dest="save", action="store_false", default=True,
+                   help="Don't write memory on devices CC deployed to (saved by default, "
+                        "like CC provisioning)")
+    # Kept so older command lines with --save still work; saving is the default now
+    p.add_argument("--save", dest="save", action="store_true", default=True,
+                   help=argparse.SUPPRESS)
     p.add_argument("--save-wait", type=int, default=60,
                    help="Seconds to wait before saving when deploy completion can't be "
                         "confirmed (default 60)")
@@ -423,7 +427,8 @@ def main():
                 if dev.get("status") == "SUCCESS" and dev.get("deviceId"):
                     deployed.append(dev["deviceId"])
 
-    if deployed is None:
+    confirmed = deployed is not None
+    if not confirmed:
         deployed = report_progress(progress, devices)
         if deployed and args.save:
             # CC's task ends when the deploy is handed off, not when devices are done
@@ -433,6 +438,11 @@ def main():
 
     if args.save:
         save_config(cc, deployed, devices, args.timeout)
+        if deployed and not confirmed:
+            print(f"\nWarning: the save ran after a fixed {args.save_wait}s wait, not a "
+                  "confirmed deploy. If a device was still applying the template, part "
+                  "of it may be unsaved. Check Deployment History in CC, and raise "
+                  "--save-wait for slow devices.")
 
 
 if __name__ == "__main__":

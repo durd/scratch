@@ -45,7 +45,7 @@ Features:
 - Apply per-device parameter overrides from JSON
 - Supports dry-run and confirmation prompts
 - Waits for task and deployment status completion
-- Optionally writes the deployed config to device memory with `--save`
+- Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
 
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
@@ -67,7 +67,6 @@ Example:
   --template "Fix-NTP" \
   --site "Global/Area/Building" \
   --family switch \
-  --save \
   --dry-run
 ```
 
@@ -125,7 +124,7 @@ Examples:
 
 - These scripts are intentionally lightweight and operationally focused.
 - They assume direct access to target systems and standard Linux/macOS shell execution.
-- Some scripts expect Python 3.6+ and the `requests` package.
+- All scripts need Python 3.6+ and the `requests` package (RHEL 8: `dnf install python3-requests`).
 
 ## Requirements
 
