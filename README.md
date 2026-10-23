@@ -50,9 +50,33 @@ Features:
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
-- `--exclude-platform` matches text in the device's model or series, case-insensitive; `2960S` catches `WS-C2960S-48FPS-L`. `--exclude-device` and `--exclude-file` take hostnames (short or full) or management IPs; the file has one per line and `#` comments. A plain name must match exactly (`sw1` doesn't match `sw10`). Wildcards `*`, `?` and `[...]` match against the full hostname, short hostname and IP, e.g. `'switch-*'` or `'10.1.1.*'`. Quote them on the command line, or zsh stops with "no matches found"; in the file they need no quotes. Excluded devices are listed with the reason, and exclusions that matched no target are reported, as they're usually typos.
-- `--batches 1,2,4` deploys in batches of those sizes, in hostname order after all filters and exclusions; the last size repeats until all devices are done (`--batches 5` is 5 at a time). The target table shows each device's batch. After each batch, which is saved before moving on, the script shows the result and asks `Continue with batch N? [y/N/a]`: `a` runs the rest without asking, anything else stops and lists the devices not deployed to. With `--yes` the batches run without asking, but stop if a batch didn't deploy to all of its devices.
-- Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
+
+#### Choosing devices
+
+Filters only narrow the targets from `--device` and `--site`. Matching ignores case.
+
+| Option | Matches |
+| --- | --- |
+| `--family switch` | text in the device family |
+| `--role access` | the exact role; `UNKNOWN` roles are left out |
+| `--exclude-platform 2960S` | text in the model or series, e.g. `WS-C2960S-48FPS-L` |
+| `--exclude-device NAME` | hostname (short or full) or management IP |
+| `--exclude-file FILE` | the same, one per line, `#` comments allowed |
+
+- Names match exactly (`sw1` isn't `sw10`). For more, use wildcards `*` `?` `[...]`,
+  e.g. `'switch-*'` or `'10.1.1.*'`. Quote them on the command line.
+- Excluded devices are listed with the reason. Exclusions that match nothing are
+  reported, as they're usually typos.
+
+#### Staged rollouts
+
+`--batches 1,2,4` deploys in batches of 1, 2, then 4 devices at a time (the last
+size repeats), in hostname order.
+
+- After each batch it asks `Continue? [y/N/a]`. `a` runs the rest, `N` stops and
+  lists what's left.
+- With `--yes` it doesn't ask, but stops if a batch didn't reach all its devices.
+- Each batch is saved before the next one starts.
 
 Example:
 
