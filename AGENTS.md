@@ -16,13 +16,14 @@ behavior change.
   any 3.12 patch release works (Ubuntu 24.04 ships 3.12.3, the reference is
   3.12.13). Use 3.12 syntax and stdlib freely, but nothing added in 3.13 or
   later. Keep all scripts on the same minimum.
-- **Dependencies are in `requirements.txt`**: only `requests` and `urllib3`.
-  Don't add others. Use the local venv (`python3 -m venv venv`,
+- **Dependencies are in `requirements.txt`.** Third-party packages are fine when
+  they help; add each one there with a minimum version that supports Python
+  3.12. Use the local venv (`python3 -m venv venv`,
   `venv/bin/pip install -r requirements.txt`) and run scripts with
   `venv/bin/python`.
-- **One file per script.** Don't split a script into modules or share code
-  between scripts. Some duplication is accepted so each file can be copied
-  around on its own.
+- **One file per script.** Don't split a script into several files of your own
+  or share code between scripts. Some duplication is accepted so each file can
+  be copied around on its own.
 - **Credentials** come from environment variables (`CC_USER`/`CC_PASS`,
   `F5_USER`/`F5_PASSWORD`, ...) with an interactive prompt as fallback. Never
   hard-code them, log them, or add them to examples.
