@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Push a single Day-N CLI template to devices via Catalyst Center.
+r"""Push a single Day-N CLI template to devices via Catalyst Center.
 
 Only the template's config is pushed (no full device provision).
 Targets: individual devices (--device) and/or all devices on sites (--site).
