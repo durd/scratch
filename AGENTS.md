@@ -12,12 +12,13 @@ behavior change.
 
 ## Constraints
 
-- **Python 3.12.13+.** `cc_deploy_template.py` and `f5_ucs_backup.py` need it
-  and check it at startup; modern syntax (f-strings, `BooleanOptionalAction`,
-  etc.) is fine there. `catc_backup_cleanup.py` has no stated minimum yet.
-- **Only dependency is `requests`** (plus `urllib3`, which ships with it). Don't
-  add others. Install it for the Python 3.12 interpreter the scripts run under,
-  not the RHEL 8 system Python 3.6.
+- **Python 3.12.13+ for every script.** Each one checks this at startup, so
+  modern syntax and stdlib features are fine. Keep the scripts on the same
+  minimum version.
+- **Dependencies are in `requirements.txt`**: only `requests` and `urllib3`.
+  Don't add others. Use the local venv (`python3 -m venv venv`,
+  `venv/bin/pip install -r requirements.txt`) and run scripts with
+  `venv/bin/python`.
 - **One file per script.** Don't split a script into modules or share code
   between scripts. Some duplication is accepted so each file can be copied
   around on its own.
