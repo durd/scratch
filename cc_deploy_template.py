@@ -181,18 +181,33 @@ def device_records(cc, ids):
     return records
 
 
-def print_table(rows, headers):
-    """Print rows as an indented table, each column as wide as its longest value."""
+def red(text):
+    """Red on a terminal, plain when piped or NO_COLOR is set."""
+    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
+        return f"\033[31m{text}\033[0m"
+    return text
+
+
+def print_table(rows, headers, highlight=None):
+    """Print rows as an indented table, each column as wide as its longest value.
+
+    highlight(header, value) -> True prints that cell in red.
+    """
     rows = [["" if v is None else str(v) for v in row] for row in rows]
     widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
 
-    def line(cells):
-        return "  " + "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
+    def line(cells, check=False):
+        # Pad outside the colour codes, so they don't count towards the width
+        out = []
+        for h, c, w in zip(headers, cells, widths):
+            pad = " " * (w - len(c))
+            out.append((red(c) if check and highlight and highlight(h, c) else c) + pad)
+        return ("  " + "  ".join(out)).rstrip()
 
     print(line(headers))
     print(line(["-" * w for w in widths]))
     for row in rows:
-        print(line(row))
+        print(line(row, check=True))
 
 
 def parse_kv(items):
@@ -399,9 +414,10 @@ def main():
 
     print(f"\n{len(devices)} target device(s):")
     print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
-                  d.get("role") or "no role"]
+                  d.get("role") or "UNKNOWN"]
                  for d in sorted(devices.values(), key=lambda d: d.get("hostname") or "")],
-                ["Hostname", "Management IP", "Family", "Role"])
+                ["Hostname", "Management IP", "Family", "Role"],
+                highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
     common = parse_kv(args.param)
     per_device = {}
