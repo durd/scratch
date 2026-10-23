@@ -254,17 +254,23 @@ def load_params_file(path):
     return data
 
 
-def ask(prompt):
-    """input() on the terminal, also when stdin is piped (e.g. --params-file -)."""
+def ask(prompt, hint, hidden=False):
+    """Ask on the terminal, also when stdin is piped (e.g. --params-file -).
+
+    Exits with hint (what to set or pass instead) when there is no terminal.
+    """
     if sys.stdin.isatty():
-        return input(prompt)
+        return getpass.getpass(prompt) if hidden else input(prompt)
     try:
-        with open("/dev/tty", "r+") as tty:
-            tty.write(prompt)
-            tty.flush()
-            return tty.readline().rstrip("\n")
+        tty = open("/dev/tty", "r+")
     except OSError:
-        sys.exit(f"No terminal to ask on: {prompt.strip()}")
+        sys.exit(f"No terminal to ask for '{prompt.strip()}', {hint}")
+    with tty:
+        if hidden:
+            return getpass.getpass(prompt)  # Reads from /dev/tty itself
+        tty.write(prompt)
+        tty.flush()
+        return tty.readline().rstrip("\n")
 
 
 def parse_kv(items):
@@ -430,8 +436,8 @@ def main():
     common = parse_kv(args.param)
     per_device = load_params_file(args.params_file) if args.params_file else {}
 
-    user = os.environ.get("CC_USER") or ask("Username: ")
-    password = os.environ.get("CC_PASS") or getpass.getpass("Password: ")
+    user = os.environ.get("CC_USER") or ask("Username: ", "set CC_USER")
+    password = os.environ.get("CC_PASS") or ask("Password: ", "set CC_PASS", hidden=True)
     cc = CatalystCenter(args.host, user, password, verify=not args.insecure)
 
     template_id, version_id, version = find_template(cc, args.template, args.project)
@@ -513,7 +519,8 @@ def main():
         return
 
     if not args.yes:
-        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ")
+        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ",
+                     "pass --yes to deploy without asking")
         if answer.strip().lower() != "y":
             sys.exit("Aborted")
 
