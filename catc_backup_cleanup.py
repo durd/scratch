@@ -14,7 +14,7 @@ script deletes any such UUID folder older than --days, in any service dir.
 For the legacy API-based approach (works on ESXi VA / newer releases that
 do have the backup API), see the --host/--username API mode below.
 
-Needs Python 3.12.13+ and `requests`.
+Needs Python 3.12+ and `requests`.
 """
 
 import argparse
@@ -30,8 +30,8 @@ from pathlib import Path
 import requests
 import urllib3
 
-if sys.version_info < (3, 12, 13):
-    sys.exit(f"Needs Python 3.12.13 or newer, this is {sys.version.split()[0]}")
+if sys.version_info < (3, 12):
+    sys.exit(f"Needs Python 3.12 or newer, this is {sys.version.split()[0]}")
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

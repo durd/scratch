@@ -127,11 +127,11 @@ Examples:
 
 - These scripts are intentionally lightweight and operationally focused.
 - They assume direct access to target systems and standard Linux/macOS shell execution.
-- All scripts need Python 3.12.13+ and the packages in `requirements.txt`. They exit with a clear message on older Pythons.
+- All scripts need Python 3.12+ and the packages in `requirements.txt`. They exit with a clear message on older Pythons.
 
 ## Requirements
 
-Python 3.12.13 or newer. Set up a virtual environment in `venv/` (ignored by git):
+Python 3.12 or newer (any patch release, e.g. Ubuntu 24.04's 3.12.3). Set up a virtual environment in `venv/` (ignored by git):
 
 ```bash
 python3 -m venv venv
@@ -139,7 +139,7 @@ venv/bin/pip install -r requirements.txt
 ```
 
 Run the scripts with the venv's Python, e.g. `venv/bin/python f5_ucs_backup.py ...`,
-or `source venv/bin/activate` first. On hosts where `python3` is older than 3.12.13
+or `source venv/bin/activate` first. On hosts where `python3` is older than 3.12
 (RHEL 8's system Python is 3.6), create the venv with a newer interpreter,
 e.g. `python3.12 -m venv venv`.
 
