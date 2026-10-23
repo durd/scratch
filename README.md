@@ -6,34 +6,6 @@ This repository is a personal scratch space for utilities that are quick to use,
 
 ## Included scripts
 
-### `f5_ucs_backup.py`
-Backs up BIG-IP / TMOS UCS archives and F5OS config database snapshots using the device REST APIs.
-
-Features:
-- Supports both TMOS and F5OS devices
-- Reads credentials from environment variables or prompts interactively
-- Optionally encrypts TMOS UCS backups
-- Keeps local and/or device-side backups based on retention settings
-- Supports host lists from CLI arguments or a file
-- Works with certificate verification override via `--insecure`
-
-Example:
-
-```bash
-./f5_ucs_backup.py bigip01 f5os:rseries01 -o /backup/f5
-./f5_ucs_backup.py -f hosts.txt -o /backup/f5 --encrypt -k 14 -d 1 --insecure
-```
-
-Required environment variables:
-
-```bash
-export F5_USER="myuser"
-export F5_PASSWORD="mypassword"
-export F5_UCS_PASSPHRASE="secret"   # only for --encrypt on TMOS
-```
-
----
-
 ### `cc_deploy_template.py`
 Deploys a single Day-N template to Catalyst Center managed devices or site scopes.
 
@@ -143,6 +115,34 @@ Required environment variables:
 ```bash
 export CC_USER="myuser"
 export CC_PASS="mypassword"
+```
+
+---
+
+### `f5_ucs_backup.py`
+Backs up BIG-IP / TMOS UCS archives and F5OS config database snapshots using the device REST APIs.
+
+Features:
+- Supports both TMOS and F5OS devices
+- Reads credentials from environment variables or prompts interactively
+- Optionally encrypts TMOS UCS backups
+- Keeps local and/or device-side backups based on retention settings
+- Supports host lists from CLI arguments or a file
+- Works with certificate verification override via `--insecure`
+
+Example:
+
+```bash
+./f5_ucs_backup.py bigip01 f5os:rseries01 -o /backup/f5
+./f5_ucs_backup.py -f hosts.txt -o /backup/f5 --encrypt -k 14 -d 1 --insecure
+```
+
+Required environment variables:
+
+```bash
+export F5_USER="myuser"
+export F5_PASSWORD="mypassword"
+export F5_UCS_PASSPHRASE="secret"   # only for --encrypt on TMOS
 ```
 
 ---
