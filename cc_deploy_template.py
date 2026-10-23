@@ -239,6 +239,34 @@ def print_params(targets, devices):
     print_table(sorted(rows, key=lambda r: r[0] or ""), ["Hostname", *keys])
 
 
+def load_params_file(path):
+    """Per-device params from a JSON file, or from stdin when path is '-'."""
+    try:
+        if path == "-":
+            data = json.load(sys.stdin)
+        else:
+            with open(path) as f:
+                data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        sys.exit(f"Can't read params from {'stdin' if path == '-' else path}: {e}")
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        sys.exit('Params must be a JSON object like {"hostname or IP": {"key": "value"}}')
+    return data
+
+
+def ask(prompt):
+    """input() on the terminal, also when stdin is piped (e.g. --params-file -)."""
+    if sys.stdin.isatty():
+        return input(prompt)
+    try:
+        with open("/dev/tty", "r+") as tty:
+            tty.write(prompt)
+            tty.flush()
+            return tty.readline().rstrip("\n")
+    except OSError:
+        sys.exit(f"No terminal to ask on: {prompt.strip()}")
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -373,7 +401,8 @@ def main():
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
-    p.add_argument("--params-file", help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}")
+    p.add_argument("--params-file",
+                   help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}, '-' reads it from stdin")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
     p.add_argument("--save", action=argparse.BooleanOptionalAction, default=True,
@@ -397,7 +426,11 @@ def main():
     if args.insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    user = os.environ.get("CC_USER") or input("Username: ")
+    # Read params before connecting, so a JSON mistake fails fast
+    common = parse_kv(args.param)
+    per_device = load_params_file(args.params_file) if args.params_file else {}
+
+    user = os.environ.get("CC_USER") or ask("Username: ")
     password = os.environ.get("CC_PASS") or getpass.getpass("Password: ")
     cc = CatalystCenter(args.host, user, password, verify=not args.insecure)
 
@@ -451,12 +484,6 @@ def main():
                 ["Hostname", "Management IP", "Family", "Role"],
                 highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
-    common = parse_kv(args.param)
-    per_device = {}
-    if args.params_file:
-        with open(args.params_file) as f:
-            per_device = json.load(f)
-
     targets = []
     for d in devices.values():
         own = (per_device.get(d.get("hostname"))
@@ -486,7 +513,7 @@ def main():
         return
 
     if not args.yes:
-        answer = input(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ")
+        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ")
         if answer.strip().lower() != "y":
             sys.exit("Aborted")
 
