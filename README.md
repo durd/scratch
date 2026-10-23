@@ -43,7 +43,8 @@ Features:
 - Optionally recurse below a site path with `--recursive`
 - Filter by device family with `--family` and by device role (access, distribution, core, ...) with `--role`
 - Apply per-device parameter overrides from JSON
-- Supports dry-run and confirmation prompts
+- Shows the targets and the template parameters each device gets before deploying
+- Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
 - Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
 

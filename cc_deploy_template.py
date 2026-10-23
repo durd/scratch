@@ -25,6 +25,10 @@ Examples:
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
 
+  # Same, and also print the JSON request that would be sent to CC
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area" --recursive --dry-run --debug
+
 Per-device params (--params-file), keyed by hostname or management IP:
   {"sw01.example.com": {"vlan": 10}, "10.1.1.11": {"vlan": 20}}
 """
@@ -210,6 +214,31 @@ def print_table(rows, headers, highlight=None):
         print(line(row, check=True))
 
 
+def show_value(v):
+    """Template param value as text: strings as-is, everything else as JSON."""
+    return v if isinstance(v, str) else json.dumps(v)
+
+
+def print_params(targets, devices):
+    """Show the template params each device gets, once if they're all the same."""
+    params = [t["params"] for t in targets]
+    if not any(params):
+        print("\nNo template parameters.")
+        return
+    if all(p == params[0] for p in params):
+        print("\nTemplate parameters (same for all devices):")
+        print_table([[k, show_value(v)] for k, v in params[0].items()], ["Parameter", "Value"])
+        return
+    keys = list(dict.fromkeys(k for p in params for k in p))
+    rows = []
+    for t in targets:
+        d = devices[t["id"]]
+        rows.append([d.get("hostname")] + [show_value(t["params"][k]) if k in t["params"] else "-"
+                                           for k in keys])
+    print("\nTemplate parameters per device:")
+    print_table(sorted(rows, key=lambda r: r[0] or ""), ["Hostname", *keys])
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -356,7 +385,10 @@ def main():
     p.add_argument("--yes", action="store_true", help="Don't ask for confirmation")
     p.add_argument("--insecure", action="store_true", help="Skip TLS verification")
     p.add_argument("--timeout", type=int, default=600, help="Seconds to wait (default 600)")
-    p.add_argument("--dry-run", action="store_true", help="Print payload, don't deploy")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Show targets and template parameters, don't deploy")
+    p.add_argument("--debug", action="store_true",
+                   help="Print the JSON sent to CC and CC's raw task output")
     args = p.parse_args()
 
     if not args.device and not args.site:
@@ -443,8 +475,14 @@ def main():
         "targetInfo": targets,
     }
 
-    if args.dry_run:
+    print_params(targets, devices)
+
+    if args.debug:
+        print("\nDeploy request:")
         print(json.dumps(body, indent=2))
+
+    if args.dry_run:
+        print("\nDry run, nothing deployed.")
         return
 
     if not args.yes:
@@ -458,6 +496,8 @@ def main():
 
     task = wait_task(cc, task_id, args.timeout)
     progress = task.get("progress", "")
+    if args.debug:
+        print(f"\nTask progress: {progress}\nTask data: {task.get('data', '')}")
     # Look for a deployment ID outside the target lists, ignoring known template/device IDs
     text = re.sub(r"\[[^\]]*\]|\{[^}]*\}", "", f"{progress} {task.get('data', '')}")
     known = {template_id, version_id, *devices}
