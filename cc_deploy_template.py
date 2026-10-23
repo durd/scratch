@@ -438,7 +438,8 @@ def main():
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--provisioned-only", action="store_true",
                    help="Only devices that have been provisioned in CC (incl. their "
-                        "network profile templates), not just discovered")
+                        "network profile templates), not just discovered. May skip a few "
+                        "provisioned devices CC has no record for, see README")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
     p.add_argument("--params-file",
                    help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}, '-' reads it from stdin")

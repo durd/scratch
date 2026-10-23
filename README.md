@@ -50,6 +50,7 @@ Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
 - `--provisioned-only` keeps devices that have been through Provision in CC, which pushes network settings and the network profile's templates. Devices that are only discovered (controllability, telemetry) are skipped. The target list always shows a Provisioned column. The list comes from `/dna/intent/api/v1/sda/provisionDevices`; if CC doesn't return it, the column shows `?` and `--provisioned-only` stops instead of deploying.
+  On 2.3.7.11 a device can be missing from that list although Inventory shows its Provision Status as Success (seen with a stack that was out of sync). It then shows `no` and `--provisioned-only` skips it; the skipped devices are listed, so check them. Re-provisioning the device in CC may restore the record (untested).
 - Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
 
 Example:
