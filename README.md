@@ -72,6 +72,55 @@ Example:
   --dry-run
 ```
 
+Several template parameters: repeat `--param`. Each value is read as JSON when it
+is valid JSON, otherwise kept as text:
+
+```bash
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Access-Baseline" \
+  --site "Global/Area/Building" \
+  --param ntp_server=10.0.0.1 \
+  --param mgmt_vlan=10 \
+  --param 'trunk_vlans=[10,20,30]' \
+  --param 'banner=Authorized access only' \
+  --dry-run
+```
+
+| `--param` | Template gets |
+| --- | --- |
+| `ntp_server=10.0.0.1` | text `10.0.0.1` (not valid JSON) |
+| `mgmt_vlan=10` | number `10` |
+| `'trunk_vlans=[10,20,30]'` | list `[10, 20, 30]` |
+| `enabled=true` | boolean `true` |
+| `site_code=007` | text `007` (leading zero isn't valid JSON) |
+| `'mgmt_vlan="10"'` | text `10`, use JSON quotes to force a string |
+| `'banner=Authorized access only'` | text, quote the whole argument for the shell |
+
+Per-device values go in a JSON file keyed by hostname or management IP. They
+override `--param` values with the same name:
+
+```json
+{
+  "sw01.example.com": {"mgmt_vlan": 110, "trunk_vlans": [110, 120]},
+  "10.1.1.11": {"mgmt_vlan": 210}
+}
+```
+
+```bash
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Access-Baseline" \
+  --site "Global/Area/Building" \
+  --param ntp_server=10.0.0.1 \
+  --param mgmt_vlan=10 \
+  --params-file params.json \
+  --dry-run
+```
+
+The dry run shows the parameters each device ends up with, so check it before
+deploying.
+
 Required environment variables:
 
 ```bash
