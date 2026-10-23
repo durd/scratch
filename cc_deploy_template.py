@@ -38,6 +38,7 @@ Per-device params (--params-file), keyed by hostname or management IP:
   {"sw01.example.com": {"vlan": 10}, "10.1.1.11": {"vlan": 20}}
 """
 import argparse
+import fnmatch
 import getpass
 import ipaddress
 import json
@@ -271,10 +272,16 @@ def read_exclude_file(path):
 
 
 def matches_name(d, name):
-    """Management IP, full hostname, or short hostname ('sw01' for 'sw01.example.com')."""
+    """Management IP, full hostname, or short hostname ('sw01' for 'sw01.example.com').
+
+    With * ? or [...] in name, a wildcard match against any of them ('switch-*', '10.1.1.*').
+    """
     host = (d.get("hostname") or "").lower()
+    candidates = (d.get("managementIpAddress") or "", host, host.split(".", 1)[0])
     name = name.lower()
-    return name in (d.get("managementIpAddress"), host) or host.startswith(name + ".")
+    if any(c in name for c in "*?["):
+        return any(fnmatch.fnmatchcase(c, name) for c in candidates)
+    return name in candidates
 
 
 def ask(prompt, hint, hidden=False):
@@ -433,9 +440,11 @@ def main():
                    help="Skip devices whose model or series contains this text, e.g. 2960S "
                         "(repeatable)")
     p.add_argument("--exclude-device", action="append", default=[],
-                   help="Skip this device, by hostname or management IP (repeatable)")
+                   help="Skip this device, by hostname or management IP; wildcards * ? [...] "
+                        "work, quote them, e.g. 'switch-*' (repeatable)")
     p.add_argument("--exclude-file",
-                   help="Skip the devices in this file, one hostname or IP per line (# comments)")
+                   help="Skip the devices in this file, one hostname, IP or wildcard per line "
+                        "(# comments)")
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")

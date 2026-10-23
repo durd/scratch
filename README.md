@@ -49,7 +49,7 @@ Features:
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
-- `--exclude-platform` matches text in the device's model or series, case-insensitive; `2960S` catches `WS-C2960S-48FPS-L`. `--exclude-device` and `--exclude-file` take hostnames (short or full) or management IPs; the file has one per line and `#` comments. Excluded devices are listed with the reason, and exclusions that matched no target are reported, as they're usually typos.
+- `--exclude-platform` matches text in the device's model or series, case-insensitive; `2960S` catches `WS-C2960S-48FPS-L`. `--exclude-device` and `--exclude-file` take hostnames (short or full) or management IPs; the file has one per line and `#` comments. A plain name must match exactly (`sw1` doesn't match `sw10`). Wildcards `*`, `?` and `[...]` match against the full hostname, short hostname and IP, e.g. `'switch-*'` or `'10.1.1.*'`. Quote them on the command line, or zsh stops with "no matches found"; in the file they need no quotes. Excluded devices are listed with the reason, and exclusions that matched no target are reported, as they're usually typos.
 - Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
 
 Example:
