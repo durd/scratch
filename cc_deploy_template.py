@@ -26,6 +26,10 @@ Examples:
       --site "Global/Area/Building/Floor 1" --exclude-platform 2960S \
       --exclude-device sw07 --exclude-device 10.1.1.99
 
+  # Staged rollout: same command each time, raising --limit (1, 2, 4, ...)
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area/Building" --limit 2
+
   # Everything under an area, including buildings/floors below it
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
@@ -305,6 +309,13 @@ def ask(prompt, hint, hidden=False):
         return tty_in.readline().rstrip("\n")
 
 
+def positive_int(value):
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return n
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -458,6 +469,9 @@ def main():
     p.add_argument("--save-wait", type=int, default=60,
                    help="Seconds to wait before saving when deploy completion can't be "
                         "confirmed (default 60)")
+    p.add_argument("--limit", type=positive_int, metavar="N",
+                   help="Only deploy to the first N target devices, by hostname, for staged "
+                        "rollouts (--limit 1, then 2, 4, ...)")
     p.add_argument("--yes", action="store_true", help="Don't ask for confirmation")
     p.add_argument("--insecure", action="store_true", help="Skip TLS verification")
     p.add_argument("--timeout", type=int, default=600, help="Seconds to wait (default 600)")
@@ -549,12 +563,22 @@ def main():
     if not devices:
         sys.exit("No devices to deploy to")
 
-    print(f"\n{len(devices)} target device(s):")
-    print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
-                  d.get("role") or "UNKNOWN"]
-                 for d in sorted(devices.values(), key=lambda d: d.get("hostname") or "")],
-                ["Hostname", "Management IP", "Family", "Role"],
-                highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
+    ordered = sorted(devices.values(), key=lambda d: d.get("hostname") or "")
+    columns = ["Hostname", "Management IP", "Family", "Role"]
+    rows = [[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
+             d.get("role") or "UNKNOWN"] for d in ordered]
+    if args.limit and args.limit < len(ordered):
+        # Same order every run, so --limit 1, 2, 4, ... grows the same batch.
+        # Devices from earlier runs are skipped by CC as already deployed (unless --force).
+        print(f"\n{len(ordered)} target device(s), deploying to the first {args.limit} "
+              f"(--limit {args.limit}):")
+        columns.append("This run")
+        for i, row in enumerate(rows):
+            row.append("yes" if i < args.limit else "later")
+        devices = {d["id"]: d for d in ordered[:args.limit]}
+    else:
+        print(f"\n{len(ordered)} target device(s):")
+    print_table(rows, columns, highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
     targets = []
     for d in devices.values():
