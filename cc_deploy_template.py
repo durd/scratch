@@ -226,7 +226,8 @@ def print_params(targets, devices):
         print("\nNo template parameters.")
         return
     if all(p == params[0] for p in params):
-        print("\nTemplate parameters (same for all devices):")
+        print("\nTemplate parameters:" if len(params) == 1
+              else "\nTemplate parameters (same for all devices):")
         print_table([[k, show_value(v)] for k, v in params[0].items()], ["Parameter", "Value"])
         return
     keys = list(dict.fromkeys(k for p in params for k in p))
@@ -262,15 +263,17 @@ def ask(prompt, hint, hidden=False):
     if sys.stdin.isatty():
         return getpass.getpass(prompt) if hidden else input(prompt)
     try:
-        tty = open("/dev/tty", "r+")
+        # Separate read and write handles: "r+" on a tty fails or returns
+        # without waiting on macOS, as the buffered file expects to seek
+        tty_in, tty_out = open("/dev/tty"), open("/dev/tty", "w")
     except OSError:
         sys.exit(f"No terminal to ask for '{prompt.strip()}', {hint}")
-    with tty:
+    with tty_in, tty_out:
         if hidden:
             return getpass.getpass(prompt)  # Reads from /dev/tty itself
-        tty.write(prompt)
-        tty.flush()
-        return tty.readline().rstrip("\n")
+        tty_out.write(prompt)
+        tty_out.flush()
+        return tty_in.readline().rstrip("\n")
 
 
 def parse_kv(items):
