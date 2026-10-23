@@ -21,6 +21,10 @@ Examples:
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --family switch --role access
 
+  # Only devices CC has provisioned, not ones that are just discovered
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area" --recursive --provisioned-only
+
   # Everything under an area, including buildings/floors below it
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
@@ -62,7 +66,8 @@ class CatalystCenter:
         self.s.headers.update({"X-Auth-Token": r.json()["Token"],
                                "Content-Type": "application/json"})
 
-    def get(self, path, **params):
+    def get(self, path, fatal=True, **params):
+        """GET with retries on rate limiting. Non-fatal calls return None on errors."""
         for _ in range(5):
             r = self.s.get(self.base + path, params=params, timeout=60)
             if r.status_code != 429:
@@ -73,6 +78,8 @@ class CatalystCenter:
         if r.status_code == 204:
             return {"response": []}
         if not r.ok:
+            if not fatal:
+                return None
             sys.exit(f"GET {path} failed: {r.status_code} {r.text}")
         return r.json()
 
@@ -150,6 +157,26 @@ def sub_sites(cc, path):
         offset += limit
     prefix = path + "/"
     return [s["id"] for s in sites if (s.get("nameHierarchy") or "").startswith(prefix)]
+
+
+def provisioned_ids(cc):
+    """Device IDs that have been through Provision in CC, or None if CC can't say.
+
+    The endpoint sits under SDA in the API, but should also list devices
+    provisioned without a fabric. A device only discovered by CC
+    (controllability, telemetry) is not in it.
+    """
+    ids, offset, limit = set(), 1, 500
+    while True:
+        page = cc.get("/dna/intent/api/v1/sda/provisionDevices", fatal=False,
+                      offset=offset, limit=limit)
+        if page is None:
+            return None
+        page = page.get("response", [])
+        ids |= {p.get("networkDeviceId") for p in page}
+        if len(page) < limit:
+            return ids
+        offset += limit
 
 
 def direct_device_ids(cc, site_id):
@@ -409,6 +436,9 @@ def main():
                         "'border router' (repeatable, combines with --family)")
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
+    p.add_argument("--provisioned-only", action="store_true",
+                   help="Only devices that have been provisioned in CC (incl. their "
+                        "network profile templates), not just discovered")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
     p.add_argument("--params-file",
                    help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}, '-' reads it from stdin")
@@ -483,15 +513,35 @@ def main():
                         ["Hostname", "Management IP", "Reachability"])
             devices = {k: d for k, d in devices.items() if d.get("reachabilityStatus") == "Reachable"}
 
+    provisioned = provisioned_ids(cc) if devices else set()
+    if provisioned is None:
+        if args.provisioned_only:
+            sys.exit("Can't get the list of provisioned devices from CC, so --provisioned-only "
+                     "can't be applied")
+        print("\nNote: CC didn't return the list of provisioned devices, "
+              "Provisioned shows '?'")
+    elif args.provisioned_only:
+        skipped = [d for d in devices.values() if d["id"] not in provisioned]
+        if skipped:
+            print(f"\nSkipping {len(skipped)} device(s) not provisioned in CC:")
+            print_table([[d.get("hostname"), d.get("managementIpAddress")]
+                         for d in sorted(skipped, key=lambda d: d.get("hostname") or "")],
+                        ["Hostname", "Management IP"])
+            devices = {k: d for k, d in devices.items() if k in provisioned}
+
     if not devices:
         sys.exit("No devices to deploy to")
 
+    def is_provisioned(d):
+        return "?" if provisioned is None else "yes" if d["id"] in provisioned else "no"
+
     print(f"\n{len(devices)} target device(s):")
     print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
-                  d.get("role") or "UNKNOWN"]
+                  d.get("role") or "UNKNOWN", is_provisioned(d)]
                  for d in sorted(devices.values(), key=lambda d: d.get("hostname") or "")],
-                ["Hostname", "Management IP", "Family", "Role"],
-                highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
+                ["Hostname", "Management IP", "Family", "Role", "Provisioned"],
+                highlight=lambda h, v: (h == "Role" and v.upper() == "UNKNOWN")
+                or (h == "Provisioned" and v != "yes"))
 
     targets = []
     for d in devices.values():

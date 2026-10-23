@@ -39,6 +39,7 @@ Features:
 - Target all devices under a site with `--site`
 - Optionally recurse below a site path with `--recursive`
 - Filter by device family with `--family` and by device role (access, distribution, core, ...) with `--role`
+- Skip devices CC has only discovered, not provisioned, with `--provisioned-only`
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
@@ -48,6 +49,7 @@ Features:
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
+- `--provisioned-only` keeps devices that have been through Provision in CC, which pushes network settings and the network profile's templates. Devices that are only discovered (controllability, telemetry) are skipped. The target list always shows a Provisioned column. The list comes from `/dna/intent/api/v1/sda/provisionDevices`; if CC doesn't return it, the column shows `?` and `--provisioned-only` stops instead of deploying.
 - Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
 
 Example:
