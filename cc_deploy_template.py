@@ -239,6 +239,40 @@ def print_params(targets, devices):
     print_table(sorted(rows, key=lambda r: r[0] or ""), ["Hostname", *keys])
 
 
+def load_params_file(path):
+    """Per-device params from a JSON file, or from stdin when path is '-'."""
+    try:
+        if path == "-":
+            data = json.load(sys.stdin)
+        else:
+            with open(path) as f:
+                data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        sys.exit(f"Can't read params from {'stdin' if path == '-' else path}: {e}")
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        sys.exit('Params must be a JSON object like {"hostname or IP": {"key": "value"}}')
+    return data
+
+
+def ask(prompt, hint, hidden=False):
+    """Ask on the terminal, also when stdin is piped (e.g. --params-file -).
+
+    Exits with hint (what to set or pass instead) when there is no terminal.
+    """
+    if sys.stdin.isatty():
+        return getpass.getpass(prompt) if hidden else input(prompt)
+    try:
+        tty = open("/dev/tty", "r+")
+    except OSError:
+        sys.exit(f"No terminal to ask for '{prompt.strip()}', {hint}")
+    with tty:
+        if hidden:
+            return getpass.getpass(prompt)  # Reads from /dev/tty itself
+        tty.write(prompt)
+        tty.flush()
+        return tty.readline().rstrip("\n")
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -373,7 +407,8 @@ def main():
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
-    p.add_argument("--params-file", help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}")
+    p.add_argument("--params-file",
+                   help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}, '-' reads it from stdin")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
     p.add_argument("--save", action=argparse.BooleanOptionalAction, default=True,
@@ -397,8 +432,12 @@ def main():
     if args.insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    user = os.environ.get("CC_USER") or input("Username: ")
-    password = os.environ.get("CC_PASS") or getpass.getpass("Password: ")
+    # Read params before connecting, so a JSON mistake fails fast
+    common = parse_kv(args.param)
+    per_device = load_params_file(args.params_file) if args.params_file else {}
+
+    user = os.environ.get("CC_USER") or ask("Username: ", "set CC_USER")
+    password = os.environ.get("CC_PASS") or ask("Password: ", "set CC_PASS", hidden=True)
     cc = CatalystCenter(args.host, user, password, verify=not args.insecure)
 
     template_id, version_id, version = find_template(cc, args.template, args.project)
@@ -451,12 +490,6 @@ def main():
                 ["Hostname", "Management IP", "Family", "Role"],
                 highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
-    common = parse_kv(args.param)
-    per_device = {}
-    if args.params_file:
-        with open(args.params_file) as f:
-            per_device = json.load(f)
-
     targets = []
     for d in devices.values():
         own = (per_device.get(d.get("hostname"))
@@ -486,7 +519,8 @@ def main():
         return
 
     if not args.yes:
-        answer = input(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ")
+        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ",
+                     "pass --yes to deploy without asking")
         if answer.strip().lower() != "y":
             sys.exit("Aborted")
 
