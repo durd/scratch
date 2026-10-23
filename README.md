@@ -41,7 +41,7 @@ Features:
 - Target devices individually with `--device`
 - Target all devices under a site with `--site`
 - Optionally recurse below a site path with `--recursive`
-- Filter by device family with `--family`
+- Filter by device family with `--family` and by device role (access, distribution, core, ...) with `--role`
 - Apply per-device parameter overrides from JSON
 - Supports dry-run and confirmation prompts
 - Waits for task and deployment status completion
@@ -50,7 +50,7 @@ Features:
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
-- Device family filtering is optional and is only used to narrow the target set when needed.
+- Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
 
 Example:
 
@@ -67,6 +67,7 @@ Example:
   --template "Fix-NTP" \
   --site "Global/Area/Building" \
   --family switch \
+  --role access \
   --dry-run
 ```
 

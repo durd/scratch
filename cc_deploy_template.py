@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Push a single Day-N CLI template to devices via Catalyst Center.
+r"""Push a single Day-N CLI template to devices via Catalyst Center.
 
 Only the template's config is pushed (no full device provision).
 Targets: individual devices (--device) and/or all devices on sites (--site).
@@ -16,6 +16,10 @@ Examples:
   # Devices assigned directly to a building, switches only
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area/Building" --family switch
+
+  # Only access switches under an area
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area" --recursive --family switch --role access
 
   # Everything under an area, including buildings/floors below it
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
@@ -177,6 +181,35 @@ def device_records(cc, ids):
     return records
 
 
+def red(text):
+    """Red on a terminal, plain when piped or NO_COLOR is set."""
+    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
+        return f"\033[31m{text}\033[0m"
+    return text
+
+
+def print_table(rows, headers, highlight=None):
+    """Print rows as an indented table, each column as wide as its longest value.
+
+    highlight(header, value) -> True prints that cell in red.
+    """
+    rows = [["" if v is None else str(v) for v in row] for row in rows]
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+
+    def line(cells, check=False):
+        # Pad outside the colour codes, so they don't count towards the width
+        out = []
+        for h, c, w in zip(headers, cells, widths):
+            pad = " " * (w - len(c))
+            out.append((red(c) if check and highlight and highlight(h, c) else c) + pad)
+        return ("  " + "  ".join(out)).rstrip()
+
+    print(line(headers))
+    print(line(["-" * w for w in widths]))
+    for row in rows:
+        print(line(row, check=True))
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -305,6 +338,9 @@ def main():
                    help="With --site: include devices in areas/buildings/floors below it")
     p.add_argument("--family", action="append", default=[],
                    help="Only devices whose family contains this text, e.g. 'switch' (repeatable)")
+    p.add_argument("--role", action="append", default=[],
+                   help="Only devices with this role in CC, e.g. access, distribution, core, "
+                        "'border router' (repeatable, combines with --family)")
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
@@ -357,22 +393,31 @@ def main():
         devices = {k: d for k, d in devices.items()
                    if any(w in (d.get("family") or "").lower() for w in wanted)}
 
+    if args.role:
+        # Exact match, so 'router' doesn't pick up 'BORDER ROUTER'
+        wanted = {r.strip().upper() for r in args.role}
+        devices = {k: d for k, d in devices.items() if (d.get("role") or "").upper() in wanted}
+
     if not args.include_unreachable:
         skipped = [d for d in devices.values() if d.get("reachabilityStatus") != "Reachable"]
         if skipped:
             print(f"\nSkipping {len(skipped)} device(s) not reachable in CC "
                   "(use --include-unreachable to include them):")
-            for d in skipped:
-                print(f"  {d.get('hostname')}  {d.get('managementIpAddress')}  "
-                      f"{d.get('reachabilityStatus')}")
+            print_table([[d.get("hostname"), d.get("managementIpAddress"),
+                          d.get("reachabilityStatus")]
+                         for d in sorted(skipped, key=lambda d: d.get("hostname") or "")],
+                        ["Hostname", "Management IP", "Reachability"])
             devices = {k: d for k, d in devices.items() if d.get("reachabilityStatus") == "Reachable"}
 
     if not devices:
         sys.exit("No devices to deploy to")
 
     print(f"\n{len(devices)} target device(s):")
-    for d in sorted(devices.values(), key=lambda d: d.get("hostname") or ""):
-        print(f"  {d.get('hostname')}  {d.get('managementIpAddress')}  {d.get('family')}")
+    print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
+                  d.get("role") or "UNKNOWN"]
+                 for d in sorted(devices.values(), key=lambda d: d.get("hostname") or "")],
+                ["Hostname", "Management IP", "Family", "Role"],
+                highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
     common = parse_kv(args.param)
     per_device = {}
