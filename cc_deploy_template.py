@@ -17,6 +17,10 @@ Examples:
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area/Building" --family switch
 
+  # Only access switches under an area
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area" --recursive --family switch --role access
+
   # Everything under an area, including buildings/floors below it
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
@@ -305,6 +309,9 @@ def main():
                    help="With --site: include devices in areas/buildings/floors below it")
     p.add_argument("--family", action="append", default=[],
                    help="Only devices whose family contains this text, e.g. 'switch' (repeatable)")
+    p.add_argument("--role", action="append", default=[],
+                   help="Only devices with this role in CC, e.g. access, distribution, core, "
+                        "'border router' (repeatable, combines with --family)")
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
@@ -357,6 +364,11 @@ def main():
         devices = {k: d for k, d in devices.items()
                    if any(w in (d.get("family") or "").lower() for w in wanted)}
 
+    if args.role:
+        # Exact match, so 'router' doesn't pick up 'BORDER ROUTER'
+        wanted = {r.strip().upper() for r in args.role}
+        devices = {k: d for k, d in devices.items() if (d.get("role") or "").upper() in wanted}
+
     if not args.include_unreachable:
         skipped = [d for d in devices.values() if d.get("reachabilityStatus") != "Reachable"]
         if skipped:
@@ -372,7 +384,8 @@ def main():
 
     print(f"\n{len(devices)} target device(s):")
     for d in sorted(devices.values(), key=lambda d: d.get("hostname") or ""):
-        print(f"  {d.get('hostname')}  {d.get('managementIpAddress')}  {d.get('family')}")
+        print(f"  {d.get('hostname')}  {d.get('managementIpAddress')}  {d.get('family')}  "
+              f"{d.get('role') or 'no role'}")
 
     common = parse_kv(args.param)
     per_device = {}
