@@ -28,6 +28,13 @@ env/
 *.swp
 *~
 
+# AI coding tools: per-user files only. Shared instructions (AGENTS.md,
+# CLAUDE.md, .cursor/rules, ...) stay tracked.
+.claude/settings.local.json
+CLAUDE.local.md
+.aider*
+!.aider.conf.yml
+
 # OS
 .DS_Store
 Thumbs.db
