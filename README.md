@@ -4,7 +4,29 @@ A small collection of network automation scripts for common operations on Cisco 
 
 This repository is a personal scratch space for utilities that are quick to use, focused on specific operational tasks, and designed to be run directly from a shell.
 
+## Setup
+
+All scripts need Python 3.12 or newer (any patch release, e.g. Ubuntu 24.04's 3.12.3)
+and the packages in `requirements.txt`; they exit with a clear message on older
+Pythons. Set up a virtual environment in `venv/` (ignored by git):
+
+```bash
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+```
+
+Run the scripts with the venv's Python, e.g. `venv/bin/python f5_ucs_backup.py ...`,
+or `source venv/bin/activate` first. On hosts where `python3` is older than 3.12
+(RHEL 8's system Python is 3.6), create the venv with a newer interpreter,
+e.g. `python3.12 -m venv venv`.
+
 ## Included scripts
+
+- [`cc_deploy_template.py`](#cc_deploy_templatepy): push a Day-N template to Catalyst Center devices or sites
+- [`f5_ucs_backup.py`](#f5_ucs_backuppy): back up BIG-IP UCS archives and F5OS config databases
+- [`catc_backup_cleanup.py`](#catc_backup_cleanuppy): delete old Catalyst Center backups
+
+How each script gets its credentials is described in its section.
 
 ### `cc_deploy_template.py`
 Deploys a single Day-N template to Catalyst Center managed devices or site scopes.
@@ -194,21 +216,6 @@ Examples:
 
 - These scripts are intentionally lightweight and operationally focused.
 - They assume direct access to target systems and standard Linux/macOS shell execution.
-- All scripts need Python 3.12+ and the packages in `requirements.txt`. They exit with a clear message on older Pythons.
-
-## Requirements
-
-Python 3.12 or newer (any patch release, e.g. Ubuntu 24.04's 3.12.3). Set up a virtual environment in `venv/` (ignored by git):
-
-```bash
-python3 -m venv venv
-venv/bin/pip install -r requirements.txt
-```
-
-Run the scripts with the venv's Python, e.g. `venv/bin/python f5_ucs_backup.py ...`,
-or `source venv/bin/activate` first. On hosts where `python3` is older than 3.12
-(RHEL 8's system Python is 3.6), create the venv with a newer interpreter,
-e.g. `python3.12 -m venv venv`.
 
 ## License
 
