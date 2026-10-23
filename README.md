@@ -31,6 +31,9 @@ How each script gets its credentials is described in its section.
 ### `cc_deploy_template.py`
 Deploys a single Day-N template to Catalyst Center managed devices or site scopes.
 
+Tested against Catalyst Center 2.3.7.11. Other releases may return API responses
+the script doesn't expect, so start with `--dry-run` (and `--debug`) there.
+
 Features:
 - Target devices individually with `--device`
 - Target all devices under a site with `--site`

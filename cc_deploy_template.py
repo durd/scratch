@@ -6,7 +6,7 @@ Targets: individual devices (--device) and/or all devices on sites (--site).
 
 Credentials: env vars CC_USER / CC_PASS, otherwise you are prompted.
 
-Needs Python 3.12+ and `requests`.
+Needs Python 3.12+ and `requests`. Tested against Catalyst Center 2.3.7.11.
 
 Examples:
   # Two devices, by IP or hostname
