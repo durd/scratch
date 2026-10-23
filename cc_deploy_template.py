@@ -226,7 +226,8 @@ def print_params(targets, devices):
         print("\nNo template parameters.")
         return
     if all(p == params[0] for p in params):
-        print("\nTemplate parameters (same for all devices):")
+        print("\nTemplate parameters:" if len(params) == 1
+              else "\nTemplate parameters (same for all devices):")
         print_table([[k, show_value(v)] for k, v in params[0].items()], ["Parameter", "Value"])
         return
     keys = list(dict.fromkeys(k for p in params for k in p))
