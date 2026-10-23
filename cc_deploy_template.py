@@ -26,6 +26,10 @@ Examples:
       --site "Global/Area/Building/Floor 1" --exclude-platform 2960S \
       --exclude-device sw07 --exclude-device 10.1.1.99
 
+  # Staged rollout: 1 device, then 2, then 4 at a time, asking between batches
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area/Building" --batches 1,2,4
+
   # Everything under an area, including buildings/floors below it
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
@@ -305,6 +309,27 @@ def ask(prompt, hint, hidden=False):
         return tty_in.readline().rstrip("\n")
 
 
+def batch_sizes(value):
+    """'1,2,4' -> [1, 2, 4]. Sizes must be 1 or more."""
+    try:
+        sizes = [int(v) for v in value.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected sizes like 1,2,4")
+    if not sizes or min(sizes) < 1:
+        raise argparse.ArgumentTypeError("batch sizes must be 1 or more")
+    return sizes
+
+
+def split_batches(items, sizes):
+    """Split items into batches of the given sizes; the last size repeats."""
+    batches, i = [], 0
+    while i < len(items):
+        size = sizes[min(len(batches), len(sizes) - 1)]
+        batches.append(items[i:i + size])
+        i += size
+    return batches
+
+
 def parse_kv(items):
     """key=value pairs. Values are parsed as JSON when possible (lists, numbers)."""
     out = {}
@@ -458,6 +483,9 @@ def main():
     p.add_argument("--save-wait", type=int, default=60,
                    help="Seconds to wait before saving when deploy completion can't be "
                         "confirmed (default 60)")
+    p.add_argument("--batches", type=batch_sizes, metavar="N[,N...]",
+                   help="Deploy in batches of these sizes, by hostname, asking before each "
+                        "next batch; the last size repeats, e.g. 1,2,4 or 5")
     p.add_argument("--yes", action="store_true", help="Don't ask for confirmation")
     p.add_argument("--insecure", action="store_true", help="Skip TLS verification")
     p.add_argument("--timeout", type=int, default=600, help="Seconds to wait (default 600)")
@@ -549,12 +577,21 @@ def main():
     if not devices:
         sys.exit("No devices to deploy to")
 
-    print(f"\n{len(devices)} target device(s):")
-    print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
-                  d.get("role") or "UNKNOWN"]
-                 for d in sorted(devices.values(), key=lambda d: d.get("hostname") or "")],
-                ["Hostname", "Management IP", "Family", "Role"],
-                highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
+    ordered = sorted(devices.values(), key=lambda d: d.get("hostname") or "")
+    batches = split_batches(ordered, args.batches) if args.batches else [ordered]
+    columns = ["Hostname", "Management IP", "Family", "Role"]
+    rows = []
+    for n, batch in enumerate(batches, 1):
+        for d in batch:
+            rows.append([d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
+                         d.get("role") or "UNKNOWN"] + ([str(n)] if len(batches) > 1 else []))
+    if len(batches) > 1:
+        columns.append("Batch")
+        sizes = ", ".join(str(len(b)) for b in batches)
+        print(f"\n{len(ordered)} target device(s) in {len(batches)} batches ({sizes}):")
+    else:
+        print(f"\n{len(ordered)} target device(s):")
+    print_table(rows, columns, highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
     targets = []
     for d in devices.values():
@@ -567,29 +604,68 @@ def main():
             "params": {**common, **own},
         })
 
-    body = {
-        "templateId": template_id,
-        "forcePushTemplate": args.force,
-        "isComposite": False,
-        "targetInfo": targets,
-    }
-
     print_params(targets, devices)
 
+    by_id = {t["id"]: t for t in targets}
     if args.debug:
         print("\nDeploy request:")
-        print(json.dumps(body, indent=2))
+        print(json.dumps(deploy_body(template_id, args.force, targets), indent=2))
 
     if args.dry_run:
         print("\nDry run, nothing deployed.")
         return
 
     if not args.yes:
-        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} device(s)? [y/N] ",
-                     "pass --yes to deploy without asking")
+        in_batches = f" in {len(batches)} batches" if len(batches) > 1 else ""
+        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} "
+                     f"device(s){in_batches}? [y/N] ", "pass --yes to deploy without asking")
         if answer.strip().lower() != "y":
             sys.exit("Aborted")
 
+    ask_between = not args.yes
+    for n, batch in enumerate(batches, 1):
+        if len(batches) > 1:
+            names = ", ".join(d.get("hostname") or d["id"] for d in batch)
+            print(f"\n=== Batch {n} of {len(batches)}: {names}")
+        deployed = deploy(cc, args, template_id, version_id,
+                          [by_id[d["id"]] for d in batch], devices)
+        rest = [d for b in batches[n:] for d in b]
+        if not rest:
+            break
+        if len(deployed) < len(batch):
+            print(f"\nBatch {n} deployed to {len(deployed)} of {len(batch)} device(s).")
+            if not ask_between:
+                stop(rest, f"Stopping after batch {n}, as not every device in it was deployed")
+        if ask_between:
+            answer = ask(f"\nContinue with batch {n + 1} ({len(batches[n])} device(s))? "
+                         "[y/N/a=all remaining] ", "pass --yes to run all batches without asking")
+            answer = answer.strip().lower()
+            if answer == "a":
+                ask_between = False
+            elif answer != "y":
+                stop(rest, "Stopped")
+
+
+def stop(rest, why):
+    """End a batched deploy early, listing the devices that weren't deployed to."""
+    print(f"\n{why}. Not deployed to {len(rest)} device(s):")
+    print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in rest],
+                ["Hostname", "Management IP"])
+    sys.exit(1)
+
+
+def deploy_body(template_id, force, targets):
+    return {
+        "templateId": template_id,
+        "forcePushTemplate": force,
+        "isComposite": False,
+        "targetInfo": targets,
+    }
+
+
+def deploy(cc, args, template_id, version_id, targets, devices):
+    """Deploy to targets, wait for the result and save config. Returns deployed device IDs."""
+    body = deploy_body(template_id, args.force, targets)
     resp = cc.post("/dna/intent/api/v2/template-programmer/template/deploy", body)
     task_id = resp["response"]["taskId"]
     print(f"Deploy task {task_id}, waiting...")
@@ -630,6 +706,7 @@ def main():
                   "confirmed deploy. If a device was still applying the template, part "
                   "of it may be unsaved. Check Deployment History in CC, and raise "
                   "--save-wait for slow devices.")
+    return deployed
 
 
 if __name__ == "__main__":
