@@ -39,6 +39,7 @@ Features:
 - Target all devices under a site with `--site`
 - Optionally recurse below a site path with `--recursive`
 - Filter by device family with `--family` and by device role (access, distribution, core, ...) with `--role`
+- Exclude devices by model with `--exclude-platform` (e.g. `2960S`) and by name with `--exclude-device` or `--exclude-file`
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
@@ -48,6 +49,7 @@ Features:
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
+- `--exclude-platform` matches text in the device's model or series, case-insensitive; `2960S` catches `WS-C2960S-48FPS-L`. `--exclude-device` and `--exclude-file` take hostnames (short or full) or management IPs; the file has one per line and `#` comments. Excluded devices are listed with the reason, and exclusions that matched no target are reported, as they're usually typos.
 - Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
 
 Example:
@@ -66,6 +68,14 @@ Example:
   --site "Global/Area/Building" \
   --family switch \
   --role access \
+  --dry-run
+
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Fix-NTP" \
+  --site "Global/Area/Building/Floor 1" \
+  --exclude-platform 2960S \
+  --exclude-file not-provisioned.txt \
   --dry-run
 ```
 

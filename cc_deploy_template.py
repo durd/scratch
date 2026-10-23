@@ -21,6 +21,11 @@ Examples:
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --family switch --role access
 
+  # A floor, but not its 2960S switches or two named devices
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area/Building/Floor 1" --exclude-platform 2960S \
+      --exclude-device sw07 --exclude-device 10.1.1.99
+
   # Everything under an area, including buildings/floors below it
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
@@ -255,6 +260,23 @@ def load_params_file(path):
     return data
 
 
+def read_exclude_file(path):
+    """Hostnames or IPs, one per line; blank lines and # comments are ignored."""
+    try:
+        with open(path) as f:
+            lines = [line.split("#", 1)[0].strip() for line in f]
+    except OSError as e:
+        sys.exit(f"Can't read exclude file {path}: {e}")
+    return [line for line in lines if line]
+
+
+def matches_name(d, name):
+    """Management IP, full hostname, or short hostname ('sw01' for 'sw01.example.com')."""
+    host = (d.get("hostname") or "").lower()
+    name = name.lower()
+    return name in (d.get("managementIpAddress"), host) or host.startswith(name + ".")
+
+
 def ask(prompt, hint, hidden=False):
     """Ask on the terminal, also when stdin is piped (e.g. --params-file -).
 
@@ -407,6 +429,13 @@ def main():
     p.add_argument("--role", action="append", default=[],
                    help="Only devices with this role in CC, e.g. access, distribution, core, "
                         "'border router' (repeatable, combines with --family)")
+    p.add_argument("--exclude-platform", action="append", default=[],
+                   help="Skip devices whose model or series contains this text, e.g. 2960S "
+                        "(repeatable)")
+    p.add_argument("--exclude-device", action="append", default=[],
+                   help="Skip this device, by hostname or management IP (repeatable)")
+    p.add_argument("--exclude-file",
+                   help="Skip the devices in this file, one hostname or IP per line (# comments)")
     p.add_argument("--include-unreachable", action="store_true",
                    help="Also deploy to devices CC doesn't list as reachable")
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
@@ -438,6 +467,8 @@ def main():
     # Read params before connecting, so a JSON mistake fails fast
     common = parse_kv(args.param)
     per_device = load_params_file(args.params_file) if args.params_file else {}
+    exclude_names = args.exclude_device + (read_exclude_file(args.exclude_file)
+                                           if args.exclude_file else [])
 
     user = os.environ.get("CC_USER") or ask("Username: ", "set CC_USER")
     password = os.environ.get("CC_PASS") or ask("Password: ", "set CC_PASS", hidden=True)
@@ -471,6 +502,29 @@ def main():
         # Exact match, so 'router' doesn't pick up 'BORDER ROUTER'
         wanted = {r.strip().upper() for r in args.role}
         devices = {k: d for k, d in devices.items() if (d.get("role") or "").upper() in wanted}
+
+    if args.exclude_platform or exclude_names:
+        unused = set(exclude_names) | set(args.exclude_platform)
+        excluded = []
+        for d in devices.values():
+            model = f"{d.get('platformId') or ''} {d.get('series') or ''}".lower()
+            platforms = [t for t in args.exclude_platform if t.lower() in model]
+            names = [n for n in exclude_names if matches_name(d, n)]
+            unused -= set(platforms) | set(names)
+            if platforms or names:
+                excluded.append((d, f"platform {platforms[0]}" if platforms else "by name"))
+        if excluded:
+            print(f"\nExcluding {len(excluded)} device(s):")
+            print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("platformId"),
+                          reason]
+                         for d, reason in sorted(excluded,
+                                                 key=lambda x: x[0].get("hostname") or "")],
+                        ["Hostname", "Management IP", "Platform", "Reason"])
+            gone = {d["id"] for d, _ in excluded}
+            devices = {k: d for k, d in devices.items() if k not in gone}
+        if unused:
+            # Usually a typo, or a device that isn't in the target set anyway
+            print(f"\nNote: these exclusions matched no target device: {', '.join(sorted(unused))}")
 
     if not args.include_unreachable:
         skipped = [d for d in devices.values() if d.get("reachabilityStatus") != "Reachable"]
