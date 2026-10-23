@@ -42,7 +42,7 @@ Features:
 - Exclude devices by model with `--exclude-platform` (e.g. `2960S`) and by name with `--exclude-device` or `--exclude-file`
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
-- Staged rollouts with `--limit N`: deploy to the first N targets only
+- Staged rollouts with `--batches`, asking before each next batch
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
 - Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
@@ -51,7 +51,7 @@ Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
 - The template does not need any device series/models or network profiles attached to it to be deployed by this script.
 - `--exclude-platform` matches text in the device's model or series, case-insensitive; `2960S` catches `WS-C2960S-48FPS-L`. `--exclude-device` and `--exclude-file` take hostnames (short or full) or management IPs; the file has one per line and `#` comments. A plain name must match exactly (`sw1` doesn't match `sw10`). Wildcards `*`, `?` and `[...]` match against the full hostname, short hostname and IP, e.g. `'switch-*'` or `'10.1.1.*'`. Quote them on the command line, or zsh stops with "no matches found"; in the file they need no quotes. Excluded devices are listed with the reason, and exclusions that matched no target are reported, as they're usually typos.
-- `--limit N` deploys to the first N targets, sorted by hostname, after all filters and exclusions. The order is the same every run, so a staged rollout is the same command with a growing N (`--limit 1`, `2`, `4`, ...). N counts devices from earlier runs too: CC skips those as already deployed with the same parameters, unless you add `--force`. The target table marks which devices are in this run.
+- `--batches 1,2,4` deploys in batches of those sizes, in hostname order after all filters and exclusions; the last size repeats until all devices are done (`--batches 5` is 5 at a time). The target table shows each device's batch. After each batch, which is saved before moving on, the script shows the result and asks `Continue with batch N? [y/N/a]`: `a` runs the rest without asking, anything else stops and lists the devices not deployed to. With `--yes` the batches run without asking, but stop if a batch didn't deploy to all of its devices.
 - Device family and role filtering are optional and only narrow the target set. Role is matched exactly as CC shows it (case-insensitive), and devices with role `UNKNOWN` are left out when `--role` is given.
 
 Example:
