@@ -12,11 +12,12 @@ behavior change.
 
 ## Constraints
 
-- **Python 3.6 compatible.** Scripts run on RHEL 8 hosts with the system Python.
-  Avoid newer syntax and stdlib features: no walrus (`:=`), no
-  `argparse.BooleanOptionalAction` (use a `--no-x` flag with `store_false`), no
-  `match`, no `dict | dict`, no `str.removeprefix`, no built-in generics like
-  `list[str]` in annotations.
+- **Python version is per script.** `cc_deploy_template.py` needs Python
+  3.12.13+ and checks this at startup. `f5_ucs_backup.py` and
+  `catc_backup_cleanup.py` target Python 3.6 (RHEL 8 system Python), so avoid
+  newer syntax and stdlib features there: no walrus (`:=`), no
+  `argparse.BooleanOptionalAction`, no `match`, no `dict | dict`, no
+  `str.removeprefix`, no built-in generics like `list[str]` in annotations.
 - **Only dependency is `requests`** (plus `urllib3`, which ships with it). Don't
   add others. Operators install it with `dnf install python3-requests`.
 - **One file per script.** Don't split a script into modules or share code

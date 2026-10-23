@@ -6,6 +6,8 @@ Targets: individual devices (--device) and/or all devices on sites (--site).
 
 Credentials: env vars CC_USER / CC_PASS, otherwise you are prompted.
 
+Needs Python 3.12.13+ and `requests`.
+
 Examples:
   # Two devices, by IP or hostname
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
@@ -33,6 +35,9 @@ import time
 
 import requests
 import urllib3
+
+if sys.version_info < (3, 12, 13):
+    sys.exit(f"Needs Python 3.12.13 or newer, this is {sys.version.split()[0]}")
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 DEVICE_PATH = "/dna/intent/api/v1/network-device"
@@ -306,12 +311,9 @@ def main():
     p.add_argument("--params-file", help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
-    p.add_argument("--no-save", dest="save", action="store_false", default=True,
-                   help="Don't write memory on devices CC deployed to (saved by default, "
-                        "like CC provisioning)")
-    # Kept so older command lines with --save still work; saving is the default now
-    p.add_argument("--save", dest="save", action="store_true", default=True,
-                   help=argparse.SUPPRESS)
+    p.add_argument("--save", action=argparse.BooleanOptionalAction, default=True,
+                   help="Write memory on devices CC deployed to (default on, like CC "
+                        "provisioning)")
     p.add_argument("--save-wait", type=int, default=60,
                    help="Seconds to wait before saving when deploy completion can't be "
                         "confirmed (default 60)")

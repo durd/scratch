@@ -125,7 +125,8 @@ Examples:
 
 - These scripts are intentionally lightweight and operationally focused.
 - They assume direct access to target systems and standard Linux/macOS shell execution.
-- All scripts need Python 3.6+ and the `requests` package (RHEL 8: `dnf install python3-requests`).
+- All scripts need the `requests` package (RHEL 8: `dnf install python3-requests`).
+- `cc_deploy_template.py` needs Python 3.12.13+; the other scripts work with Python 3.6+.
 
 ## Requirements
 
