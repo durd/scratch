@@ -4,7 +4,7 @@ Back up F5 devices via their REST APIs (HTTPS/443 only):
   - BIG-IP / TMOS:  UCS archive          (iControl REST)
   - F5OS (rSeries): config database XML  (F5OS API, /api on 443)
 
-Needs Python 3.12.13+ and `requests`.
+Needs Python 3.12+ and `requests`.
 
 Hosts (arguments or -f file, one per line, # for comments):
   bigip01            TMOS (default when no prefix)
@@ -31,8 +31,8 @@ import time
 import requests
 import urllib3
 
-if sys.version_info < (3, 12, 13):
-    sys.exit(f"Needs Python 3.12.13 or newer, this is {sys.version.split()[0]}")
+if sys.version_info < (3, 12):
+    sys.exit(f"Needs Python 3.12 or newer, this is {sys.version.split()[0]}")
 
 CHUNK = 1024 * 1024          # 1 MB, iControl REST max chunk size
 TASK_TIMEOUT = 30 * 60       # seconds to wait for UCS creation

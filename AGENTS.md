@@ -12,9 +12,10 @@ behavior change.
 
 ## Constraints
 
-- **Python 3.12.13+ for every script.** Each one checks this at startup, so
-  modern syntax and stdlib features are fine. Keep the scripts on the same
-  minimum version.
+- **Code against Python 3.12.** Every script checks for 3.12+ at startup, so
+  any 3.12 patch release works (Ubuntu 24.04 ships 3.12.3, the reference is
+  3.12.13). Use 3.12 syntax and stdlib freely, but nothing added in 3.13 or
+  later. Keep all scripts on the same minimum.
 - **Dependencies are in `requirements.txt`**: only `requests` and `urllib3`.
   Don't add others. Use the local venv (`python3 -m venv venv`,
   `venv/bin/pip install -r requirements.txt`) and run scripts with

@@ -6,7 +6,7 @@ Targets: individual devices (--device) and/or all devices on sites (--site).
 
 Credentials: env vars CC_USER / CC_PASS, otherwise you are prompted.
 
-Needs Python 3.12.13+ and `requests`.
+Needs Python 3.12+ and `requests`.
 
 Examples:
   # Two devices, by IP or hostname
@@ -40,8 +40,8 @@ import time
 import requests
 import urllib3
 
-if sys.version_info < (3, 12, 13):
-    sys.exit(f"Needs Python 3.12.13 or newer, this is {sys.version.split()[0]}")
+if sys.version_info < (3, 12):
+    sys.exit(f"Needs Python 3.12 or newer, this is {sys.version.split()[0]}")
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 DEVICE_PATH = "/dna/intent/api/v1/network-device"
