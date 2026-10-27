@@ -208,7 +208,7 @@ def print_table(rows, headers, highlight=None):
     highlight(header, value) -> True prints that cell in red.
     """
     rows = [["" if v is None else str(v) for v in row] for row in rows]
-    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+    widths = [max([len(h)] + [len(r[i]) for r in rows]) for i, h in enumerate(headers)]
 
     def line(cells, check=False):
         # Pad outside the colour codes, so they don't count towards the width
