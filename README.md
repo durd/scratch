@@ -38,8 +38,8 @@ Features:
 - Target devices individually with `--device`
 - Target all devices under a site with `--site`
 - Optionally recurse below a site path with `--recursive`
-- Filter by device family with `--family` and by device role (access, distribution, core, ...) with `--role`
-- Exclude devices by model with `--exclude-platform` (e.g. `2960S`) and by name with `--exclude-device` or `--exclude-file`
+- Filter by device family with `--family`, device role (access, distribution, core, ...) with `--role`, and SNMP contact with `--contact`
+- Exclude devices by model with `--exclude-platform` (e.g. `2960S`), SNMP contact with `--exclude-contact`, and name with `--exclude-device` or `--exclude-file`
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
 - Staged rollouts with `--batches`, asking before each next batch
@@ -59,12 +59,17 @@ Filters only narrow the targets from `--device` and `--site`. Matching ignores c
 | --- | --- |
 | `--family switch` | text in the device family |
 | `--role access` | the exact role; `UNKNOWN` roles are left out |
+| `--contact noc` | text in the SNMP contact (keeps matches) |
+| `--exclude-contact TEXT` | text in the SNMP contact (skips matches) |
 | `--exclude-platform 2960S` | text in the model or series, e.g. `WS-C2960S-48FPS-L` |
 | `--exclude-device NAME` | hostname (short or full) or management IP |
 | `--exclude-file FILE` | the same, one per line, `#` comments allowed |
 
 - Names match exactly (`sw1` isn't `sw10`). For more, use wildcards `*` `?` `[...]`,
   e.g. `'switch-*'` or `'10.1.1.*'`. Quote them on the command line.
+- In contacts, a wildcard must match the whole contact: `'noc@*'` matches `noc@example.com`
+  but not `NOC Team <noc@example.com>`. CC reads contacts at inventory sync, so recent
+  changes on a device may not show yet. The target table shows the contact when used.
 - Excluded devices are listed with the reason. Exclusions that match nothing are
   reported, as they're usually typos.
 
