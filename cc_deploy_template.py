@@ -288,6 +288,15 @@ def matches_name(d, name):
     return name in candidates
 
 
+def matches_contact(d, text):
+    """Text anywhere in the SNMP contact, or with * ? [...] a wildcard match of all of it."""
+    contact = (d.get("snmpContact") or "").lower()
+    text = text.lower()
+    if any(c in text for c in "*?["):
+        return fnmatch.fnmatchcase(contact, text)
+    return text in contact
+
+
 def ask(prompt, hint, hidden=False):
     """Ask on the terminal, also when stdin is piped (e.g. --params-file -).
 
@@ -461,6 +470,12 @@ def main():
     p.add_argument("--role", action="append", default=[],
                    help="Only devices with this role in CC, e.g. access, distribution, core, "
                         "'border router' (repeatable, combines with --family)")
+    p.add_argument("--contact", action="append", default=[],
+                   help="Only devices whose SNMP contact contains this text; wildcards "
+                        "* ? [...] match the whole contact (repeatable)")
+    p.add_argument("--exclude-contact", action="append", default=[],
+                   help="Skip devices whose SNMP contact contains this text, or matches a "
+                        "wildcard (repeatable)")
     p.add_argument("--exclude-platform", action="append", default=[],
                    help="Skip devices whose model or series contains this text, e.g. 2960S "
                         "(repeatable)")
@@ -540,16 +555,26 @@ def main():
         wanted = {r.strip().upper() for r in args.role}
         devices = {k: d for k, d in devices.items() if (d.get("role") or "").upper() in wanted}
 
-    if args.exclude_platform or exclude_names:
-        unused = set(exclude_names) | set(args.exclude_platform)
+    if args.contact:
+        # Contact as CC last read it from the device, at the latest inventory sync
+        devices = {k: d for k, d in devices.items()
+                   if any(matches_contact(d, t) for t in args.contact)}
+
+    if args.exclude_platform or exclude_names or args.exclude_contact:
+        unused = set(exclude_names) | set(args.exclude_platform) | set(args.exclude_contact)
         excluded = []
         for d in devices.values():
             model = f"{d.get('platformId') or ''} {d.get('series') or ''}".lower()
             platforms = [t for t in args.exclude_platform if t.lower() in model]
             names = [n for n in exclude_names if matches_name(d, n)]
-            unused -= set(platforms) | set(names)
-            if platforms or names:
-                excluded.append((d, f"platform {platforms[0]}" if platforms else "by name"))
+            contacts = [t for t in args.exclude_contact if matches_contact(d, t)]
+            unused -= set(platforms) | set(names) | set(contacts)
+            if platforms:
+                excluded.append((d, f"platform {platforms[0]}"))
+            elif names:
+                excluded.append((d, "by name"))
+            elif contacts:
+                excluded.append((d, f"contact {contacts[0]}"))
         if excluded:
             print(f"\nExcluding {len(excluded)} device(s):")
             print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("platformId"),
@@ -579,12 +604,16 @@ def main():
 
     ordered = sorted(devices.values(), key=lambda d: d.get("hostname") or "")
     batches = split_batches(ordered, args.batches) if args.batches else [ordered]
-    columns = ["Hostname", "Management IP", "Family", "Role"]
+    show_contact = bool(args.contact or args.exclude_contact)
+    columns = (["Hostname", "Management IP", "Family", "Role"]
+               + (["Contact"] if show_contact else []))
     rows = []
     for n, batch in enumerate(batches, 1):
         for d in batch:
             rows.append([d.get("hostname"), d.get("managementIpAddress"), d.get("family"),
-                         d.get("role") or "UNKNOWN"] + ([str(n)] if len(batches) > 1 else []))
+                         d.get("role") or "UNKNOWN"]
+                        + ([d.get("snmpContact") or ""] if show_contact else [])
+                        + ([str(n)] if len(batches) > 1 else []))
     if len(batches) > 1:
         columns.append("Batch")
         sizes = ", ".join(str(len(b)) for b in batches)
