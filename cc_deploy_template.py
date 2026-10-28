@@ -59,6 +59,8 @@ if sys.version_info < (3, 12):
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 DEVICE_PATH = "/dna/intent/api/v1/network-device"
+TEMPLATE_PATH = "/dna/intent/api/v1/template-programmer/template"
+PROFILE_PATH = "/dna/intent/api/v1/networkProfilesForSites"
 
 
 class CatalystCenter:
@@ -72,7 +74,8 @@ class CatalystCenter:
         self.s.headers.update({"X-Auth-Token": r.json()["Token"],
                                "Content-Type": "application/json"})
 
-    def get(self, path, **params):
+    def get(self, path, none_on=(), **params):
+        """GET path. A status in none_on (e.g. (404,)) returns None instead of exiting."""
         for _ in range(5):
             r = self.s.get(self.base + path, params=params, timeout=60)
             if r.status_code != 429:
@@ -82,6 +85,8 @@ class CatalystCenter:
             time.sleep(wait)
         if r.status_code == 204:
             return {"response": []}
+        if r.status_code in none_on:
+            return None
         if not r.ok:
             sys.exit(f"GET {path} failed: {r.status_code} {r.text}")
         return r.json()
@@ -94,9 +99,9 @@ class CatalystCenter:
 
 
 def find_template(cc, name, project):
-    """Return (template_id, latest_version_id, version_number)."""
+    """Return (template_id, latest_version_id, version_number, project_name)."""
     params = {"projectNames": project} if project else {}
-    templates = cc.get("/dna/intent/api/v1/template-programmer/template", **params)
+    templates = cc.get(TEMPLATE_PATH, **params)
     if isinstance(templates, dict):
         templates = templates.get("response", [])
 
@@ -112,7 +117,7 @@ def find_template(cc, name, project):
     if not versions:
         sys.exit(f"Template '{name}' has no committed version, commit it first")
     latest = max(versions, key=lambda v: int(v.get("version", 0)))
-    return t["templateId"], latest["id"], latest.get("version")
+    return t["templateId"], latest["id"], latest.get("version"), t.get("projectName")
 
 
 def resolve_device(cc, name):
@@ -149,17 +154,25 @@ def find_site(cc, path):
     return sites[0]["id"], sites[0].get("type", "?")
 
 
+def get_all(cc, path, none_on=()):
+    """Every item of a paged (offset/limit) list. None on a status in none_on."""
+    items, offset, limit = [], 1, 500
+    while True:
+        page = cc.get(path, none_on=none_on, offset=offset, limit=limit)
+        if page is None:
+            return None
+        page = page.get("response") or []
+        items += page
+        if len(page) < limit:
+            return items
+        offset += limit
+
+
 def sub_sites(cc, path):
     """IDs of all sites below path (areas, buildings, floors), not including path itself."""
-    sites, offset, limit = [], 1, 500
-    while True:
-        page = cc.get("/dna/intent/api/v1/sites", offset=offset, limit=limit).get("response", [])
-        sites += page
-        if len(page) < limit:
-            break
-        offset += limit
     prefix = path + "/"
-    return [s["id"] for s in sites if (s.get("nameHierarchy") or "").startswith(prefix)]
+    return [s["id"] for s in get_all(cc, "/dna/intent/api/v1/sites")
+            if (s.get("nameHierarchy") or "").startswith(prefix)]
 
 
 def direct_device_ids(cc, site_id):
@@ -175,15 +188,119 @@ def direct_device_ids(cc, site_id):
 
 
 def site_device_ids(cc, site_id, path, recursive):
-    """Device IDs on the site, and with recursive also on every site below it."""
+    """{device ID: site ID} on the site, and with recursive also on every site below it."""
     site_ids = [site_id]
     if recursive:
         site_ids += sub_sites(cc, path)
         print(f"  Checking {len(site_ids)} site(s) under {path}...")
-    ids = []
+    found = {}
     for sid in site_ids:
-        ids += direct_device_ids(cc, sid)
-    return list(dict.fromkeys(ids))  # Drop duplicates, keep order
+        for i in direct_device_ids(cc, sid):
+            found.setdefault(i, sid)
+    return found
+
+
+def template_profiles(cc, template_id, name, project):
+    """Network profiles the template is attached to, directly or inside a composite.
+
+    Returns {profile ID: (profile name, composite name or None)}, or None when
+    this CC can't list a profile's templates (that endpoint is 2.3.7.9 and later).
+    """
+    profiles = get_all(cc, PROFILE_PATH, none_on=(404,))
+    if profiles is None:
+        return None
+    # The full list, as a composite can live in another project than its members
+    listing = cc.get(TEMPLATE_PATH)
+    if isinstance(listing, dict):
+        listing = listing.get("response", [])
+    flagged = any("composite" in t for t in listing)
+    composite_ids = {t.get("templateId") for t in listing if t.get("composite")}
+
+    members = {}  # Composite ID -> (name, member records), fetched once
+
+    def composite(tid):
+        if tid not in members:
+            t = cc.get(f"{TEMPLATE_PATH}/{tid}", none_on=(404,)) or {}
+            t = t.get("response", t)  # Some releases wrap the record, some don't
+            members[tid] = (t.get("name") or tid,
+                            t.get("containingTemplates") or [])
+        return members[tid]
+
+    found, answered = {}, False
+    for prof in profiles:
+        # Any 4xx: some profile types (Assurance, Telemetry, ...) may not take
+        # templates. Skipping one can only make the check stricter.
+        attached = cc.get(f"{PROFILE_PATH}/{prof.get('id')}/templates",
+                          none_on=range(400, 500))
+        if attached is None:
+            continue
+        answered = True
+        for t in attached.get("response") or []:
+            tid = t.get("id")
+            if tid == template_id:
+                found[prof["id"]] = (prof.get("name") or prof["id"], None)
+                break
+            if flagged and tid not in composite_ids:
+                continue
+            comp_name, contained = composite(tid)
+            # Members point at the template ID; name + project also catches older references
+            if any(c.get("id") == template_id
+                   or (c.get("name"), c.get("projectName")) == (name, project)
+                   for c in contained):
+                found[prof["id"]] = (prof.get("name") or prof["id"], comp_name)
+                break
+    return found if answered or not profiles else None
+
+
+def check_profiles(cc, template_id, name, project, devices, device_site):
+    """Exit unless every device sits on a site covered by a profile the template is in.
+
+    device_site has the site ID for devices found through --site; the others are
+    looked up. A profile assigned to an area also covers the sites below it.
+    """
+    print("\nChecking the template's network profiles...")
+    how = "skip the check with --skip-profile-check"
+    profiles = template_profiles(cc, template_id, name, project)
+    if profiles is None:
+        sys.exit(f"Can't check network profiles: this Catalyst Center doesn't list the "
+                 f"templates of a profile (needs 2.3.7.9 or later); {how}")
+    if not profiles:
+        sys.exit(f"Template '{name}' isn't attached to any network profile, directly or "
+                 f"in a composite; {how}")
+    for pname, via in profiles.values():
+        print(f"  Profile {pname}" + (f" (in composite {via})" if via else ""))
+
+    paths = {s.get("id"): s.get("nameHierarchy") or ""
+             for s in get_all(cc, "/dna/intent/api/v1/sites")}
+    allowed = set()
+    for pid in profiles:
+        for s in get_all(cc, f"{PROFILE_PATH}/{pid}/siteAssignments", none_on=(404,)) or []:
+            if paths.get(s.get("id")):
+                allowed.add(paths[s["id"]])
+
+    outside = []
+    for d in devices.values():
+        sid = device_site.get(d["id"])
+        if sid:
+            site = paths.get(sid, "")
+        else:
+            r = cc.get(f"/dna/intent/api/v1/networkDevices/{d['id']}/assignedToSite",
+                       none_on=(404,)) or {}
+            r = r.get("response") or {}
+            site = r.get("siteNameHierarchy") or paths.get(r.get("siteId"), "")
+        if not any(site == a or site.startswith(a + "/") for a in allowed):
+            outside.append((d, site))
+    if outside:
+        print(f"\n{len(outside)} device(s) are on sites none of these profiles is assigned to:")
+        print_table([[d.get("hostname"), d.get("managementIpAddress"), site or "(no site)"]
+                     for d, site in sorted(outside, key=lambda x: x[0].get("hostname") or "")],
+                    ["Hostname", "Management IP", "Site"])
+        print("\nThe profiles are assigned to:" if allowed
+              else "\nThe profiles aren't assigned to any site.")
+        for a in sorted(allowed):
+            print(f"  {a}")
+        sys.exit(f"Template '{name}' doesn't belong on those sites; {how}")
+    print(f"  All {len(devices)} device(s) are on sites these profiles are assigned to")
 
 
 def device_records(cc, ids):
@@ -490,6 +607,9 @@ def main():
     p.add_argument("--param", action="append", help="key=value for all devices (repeatable)")
     p.add_argument("--params-file",
                    help="JSON: {\"hostname or IP\": {\"key\": \"value\"}}, '-' reads it from stdin")
+    p.add_argument("--skip-profile-check", action="store_true",
+                   help="Deploy even to devices on sites the template's network profiles "
+                        "(directly or via a composite) aren't assigned to")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
     p.add_argument("--save", action=argparse.BooleanOptionalAction, default=True,
@@ -526,23 +646,26 @@ def main():
     password = os.environ.get("CC_PASS") or ask("Password: ", "set CC_PASS", hidden=True)
     cc = CatalystCenter(args.host, user, password, verify=not args.insecure)
 
-    template_id, version_id, version = find_template(cc, args.template, args.project)
+    template_id, version_id, version, project = find_template(cc, args.template, args.project)
     print(f"Template '{args.template}' version {version}")
 
     # Collect target devices, keyed by UUID so duplicates are dropped
     devices = {}
+    device_site = {}  # Device ID -> site ID, for devices found through --site
     for name in args.device:
         d = resolve_device(cc, name)
         devices[d["id"]] = d
     for path in args.site:
         site_id, site_type = find_site(cc, path)
         ids = site_device_ids(cc, site_id, path, args.recursive)
+        for i, sid in ids.items():
+            device_site.setdefault(i, sid)
         scope = "incl. sub-sites" if args.recursive else "directly assigned"
         print(f"Site {path} ({site_type}): {len(ids)} devices {scope}")
         if not ids and not args.recursive:
             print("  Note: no devices directly on this site. If they sit on floors or "
                   "buildings below it, add --recursive.")
-        for d in device_records(cc, ids):
+        for d in device_records(cc, list(ids)):
             devices[d["id"]] = d
 
     if args.family:
@@ -601,6 +724,11 @@ def main():
 
     if not devices:
         sys.exit("No devices to deploy to")
+
+    if args.skip_profile_check:
+        print("\nSkipping the network profile check (--skip-profile-check).")
+    else:
+        check_profiles(cc, template_id, args.template, project, devices, device_site)
 
     ordered = sorted(devices.values(), key=lambda d: d.get("hostname") or "")
     batches = split_batches(ordered, args.batches) if args.batches else [ordered]

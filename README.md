@@ -43,13 +43,36 @@ Features:
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
 - Staged rollouts with `--batches`, asking before each next batch
+- Stops if the template isn't in a network profile assigned to the targets' sites (directly or through a composite)
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
 - Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
 
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
-- The template does not need any device series/models or network profiles attached to it to be deployed by this script.
+- The template does not need any device series/models attached to it.
+- It does need a network profile: see [Network profile check](#network-profile-check).
+
+#### Network profile check
+
+Before showing the targets, the script checks that the template belongs on their
+sites, the way CC's own provisioning does:
+
+1. It finds the network profiles the template is attached to, either directly or
+   inside a composite template attached to the profile.
+2. Every target device must be on a site one of those profiles is assigned to, or
+   on a site below one (a profile on an area covers its buildings and floors).
+
+If a device isn't, the script lists those devices with their site and the sites
+the profiles are assigned to, and stops before deploying. It also stops when the
+template isn't in any profile, or when CC can't list a profile's templates
+(2.3.7.9 and later can). `--dry-run` runs the check too.
+
+`--skip-profile-check` turns the check off, e.g. for a one-off template that
+isn't in a profile.
+
+The check hasn't been run against a live CC yet. Try it with `--dry-run` on a
+site you know is covered and one you know isn't.
 
 #### Choosing devices
 
