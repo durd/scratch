@@ -256,7 +256,7 @@ def check_profiles(cc, template_id, name, project, devices, device_site, debug=F
     """Exit unless every device sits on a site covered by a profile the template is in.
 
     device_site has the site ID for devices found through --site; the others are
-    looked up. A profile assigned to an area also covers the sites below it.
+    looked up.
     """
     print("\nChecking the template's network profiles...")
     how = "skip the check with --skip-profile-check"
@@ -280,7 +280,7 @@ def check_profiles(cc, template_id, name, project, devices, device_site, debug=F
         # Only the top sites; the ones below them are covered anyway
         top = [x for x in sites if not any(x.startswith(y + "/") for y in sites)]
         print(f"  Profile {pname}" + (f" (in composite {via})" if via else "")
-              + f": {', '.join(top) or 'no sites'}")
+              + f": {', '.join(top) or 'no sites'} ({len(sites)} site(s))")
 
     outside = []
     for d in devices.values():
@@ -292,21 +292,21 @@ def check_profiles(cc, template_id, name, project, devices, device_site, debug=F
                        none_on=(404,)) or {}
             r = r.get("response") or {}
             site = r.get("siteNameHierarchy") or paths.get(r.get("siteId"), "")
-        covering = [a for a in allowed if site == a or site.startswith(a + "/")]
+        # The device's own site only, not the sites above it: siteAssignments
+        # already lists the sites that inherit the profile, and leaves out sites
+        # below that have another profile of their own (seen on 3.2.3)
         if debug:
             print(f"  {d.get('hostname')}: {site or '(no site)'} -> "
-                  + (f"{covering[0]} ({allowed[covering[0]]})" if covering else "not covered"))
-        if not covering:
+                  + (allowed[site] if site in allowed else "not covered"))
+        if site not in allowed:
             outside.append((d, site))
     if outside:
         print(f"\n{len(outside)} device(s) are on sites none of these profiles is assigned to:")
         print_table([[d.get("hostname"), d.get("managementIpAddress"), site or "(no site)"]
                      for d, site in sorted(outside, key=lambda x: x[0].get("hostname") or "")],
                     ["Hostname", "Management IP", "Site"])
-        print("\nThe profiles are assigned to:" if allowed
-              else "\nThe profiles aren't assigned to any site.")
-        for a in sorted(allowed):
-            print(f"  {a}")
+        if not allowed:
+            print("\nThe profiles aren't assigned to any site.")
         sys.exit(f"Template '{name}' doesn't belong on those sites; {how}")
     print(f"  All {len(devices)} device(s) are on sites these profiles are assigned to")
 

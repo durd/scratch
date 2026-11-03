@@ -60,19 +60,22 @@ sites, the way CC's own provisioning does:
 
 1. It finds the network profiles the template is attached to, either directly or
    inside a composite template attached to the profile.
-2. Every target device must be on a site one of those profiles is assigned to, or
-   on a site below one (a profile on an area covers its buildings and floors).
+2. Every target device must be on a site where one of those profiles applies. A
+   profile on an area applies to the buildings and floors below it, except where
+   a site below has another profile of the same type assigned.
 
-If a device isn't, the script lists those devices with their site and the sites
-the profiles are assigned to, and stops before deploying. It also stops when the
+Each profile is shown with the top sites it covers. If a device isn't covered, the
+script lists those devices with their site and stops before deploying. With
+`--debug` it also prints CC's site list for each profile and which profile
+covers each device. It also stops when the
 template isn't in any profile, or when CC can't list a profile's templates
 (2.3.7.9 and later can). `--dry-run` runs the check too.
 
 `--skip-profile-check` turns the check off, e.g. for a one-off template that
 isn't in a profile.
 
-The check hasn't been run against a live CC yet. Try it with `--dry-run` on a
-site you know is covered and one you know isn't.
+The check hasn't been fully verified against a live CC yet. Try it with
+`--dry-run` on a site you know is covered and one you know isn't.
 
 #### Choosing devices
 
