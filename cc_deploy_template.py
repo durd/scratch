@@ -252,7 +252,7 @@ def template_profiles(cc, template_id, name, project):
     return found if answered or not profiles else None
 
 
-def check_profiles(cc, template_id, name, project, devices, device_site):
+def check_profiles(cc, template_id, name, project, devices, device_site, debug=False):
     """Exit unless every device sits on a site covered by a profile the template is in.
 
     device_site has the site ID for devices found through --site; the others are
@@ -267,16 +267,20 @@ def check_profiles(cc, template_id, name, project, devices, device_site):
     if not profiles:
         sys.exit(f"Template '{name}' isn't attached to any network profile, directly or "
                  f"in a composite; {how}")
-    for pname, via in profiles.values():
-        print(f"  Profile {pname}" + (f" (in composite {via})" if via else ""))
-
     paths = {s.get("id"): s.get("nameHierarchy") or ""
              for s in get_all(cc, "/dna/intent/api/v1/sites")}
-    allowed = set()
-    for pid in profiles:
-        for s in get_all(cc, f"{PROFILE_PATH}/{pid}/siteAssignments", none_on=(404,)) or []:
-            if paths.get(s.get("id")):
-                allowed.add(paths[s["id"]])
+    allowed = {}  # Site path -> profile name
+    for pid, (pname, via) in profiles.items():
+        assigned = get_all(cc, f"{PROFILE_PATH}/{pid}/siteAssignments", none_on=(404,)) or []
+        if debug:
+            print(f"\n  siteAssignments of {pname}:\n{json.dumps(assigned, indent=2)}")
+        sites = sorted({paths[a["id"]] for a in assigned if paths.get(a.get("id"))})
+        for site in sites:
+            allowed.setdefault(site, pname)
+        # Only the top sites; the ones below them are covered anyway
+        top = [x for x in sites if not any(x.startswith(y + "/") for y in sites)]
+        print(f"  Profile {pname}" + (f" (in composite {via})" if via else "")
+              + f": {', '.join(top) or 'no sites'}")
 
     outside = []
     for d in devices.values():
@@ -288,7 +292,11 @@ def check_profiles(cc, template_id, name, project, devices, device_site):
                        none_on=(404,)) or {}
             r = r.get("response") or {}
             site = r.get("siteNameHierarchy") or paths.get(r.get("siteId"), "")
-        if not any(site == a or site.startswith(a + "/") for a in allowed):
+        covering = [a for a in allowed if site == a or site.startswith(a + "/")]
+        if debug:
+            print(f"  {d.get('hostname')}: {site or '(no site)'} -> "
+                  + (f"{covering[0]} ({allowed[covering[0]]})" if covering else "not covered"))
+        if not covering:
             outside.append((d, site))
     if outside:
         print(f"\n{len(outside)} device(s) are on sites none of these profiles is assigned to:")
@@ -728,7 +736,8 @@ def main():
     if args.skip_profile_check:
         print("\nSkipping the network profile check (--skip-profile-check).")
     else:
-        check_profiles(cc, template_id, args.template, project, devices, device_site)
+        check_profiles(cc, template_id, args.template, project, devices, device_site,
+                       args.debug)
 
     ordered = sorted(devices.values(), key=lambda d: d.get("hostname") or "")
     batches = split_batches(ordered, args.batches) if args.batches else [ordered]
