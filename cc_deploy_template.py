@@ -561,13 +561,16 @@ def save_config(cc, ids, devices, timeout):
 
 
 def wait_task(cc, task_id, timeout):
+    """Wait for a CC task to end and return its details (progress, data)."""
+    # /tasks/{id} replaces /task/{id}, which is sunset since 2.3.7.6
     end = time.time() + timeout
     while time.time() < end:
-        task = cc.get(f"/dna/intent/api/v1/task/{task_id}")["response"]
-        if task.get("isError"):
-            sys.exit(f"Task failed: {task.get('failureReason') or task.get('progress')}")
-        if task.get("endTime"):
-            return task
+        task = cc.get(f"/dna/intent/api/v1/tasks/{task_id}").get("response") or {}
+        if task.get("status") in ("SUCCESS", "FAILURE") or task.get("endTime"):
+            detail = cc.get(f"/dna/intent/api/v1/tasks/{task_id}/detail").get("response") or {}
+            if task.get("status") == "FAILURE":
+                sys.exit(f"Task failed: {detail.get('failureReason') or detail.get('progress')}")
+            return detail
         time.sleep(3)
     sys.exit("Timed out waiting for task")
 
