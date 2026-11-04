@@ -31,7 +31,7 @@ How each script gets its credentials is described in its section.
 ### `cc_deploy_template.py`
 Deploys a single Day-N template to Catalyst Center managed devices or site scopes.
 
-Tested against Catalyst Center 2.3.7.11. Other releases may return API responses
+Tested against Catalyst Center 3.2.3. Other releases may return API responses
 the script doesn't expect, so start with `--dry-run` (and `--debug`) there.
 
 Features:
@@ -75,8 +75,8 @@ template isn't in any profile, or when CC can't list a profile's templates
 `--skip-profile-check` turns the check off, e.g. for a one-off template that
 isn't in a profile.
 
-The check hasn't been fully verified against a live CC yet. Try it with
-`--dry-run` on a site you know is covered and one you know isn't.
+When you use it on new sites or profiles, try it first with `--dry-run` on a site
+you know is covered and one you know isn't.
 
 #### Choosing devices
 
