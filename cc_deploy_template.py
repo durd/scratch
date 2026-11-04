@@ -595,7 +595,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--host", required=True, help="Catalyst Center hostname/IP")
-    p.add_argument("--template", required=True, help="Template name")
+    p.add_argument("--template", help="Template name (not needed with --save-only)")
     p.add_argument("--project", help="Project name (if template name is not unique)")
     p.add_argument("--device", action="append", default=[],
                    help="Management IP or hostname as shown in inventory (repeatable)")
@@ -636,6 +636,9 @@ def main():
     p.add_argument("--save", action=argparse.BooleanOptionalAction, default=True,
                    help="Write memory on devices CC deployed to (default on, like CC "
                         "provisioning)")
+    p.add_argument("--save-only", action="store_true",
+                   help="Don't deploy, only write memory on the target devices, e.g. after a "
+                        "deploy whose save didn't run")
     p.add_argument("--save-wait", type=int, default=60,
                    help="Seconds to wait before saving when deploy completion can't be "
                         "confirmed (default 60)")
@@ -653,6 +656,10 @@ def main():
 
     if not args.device and not args.site:
         p.error("give at least one --device or --site")
+    if not args.template and not args.save_only:
+        p.error("--template is required, unless --save-only")
+    if args.save_only and not args.save:
+        p.error("--save-only and --no-save don't go together")
 
     if args.insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -667,8 +674,10 @@ def main():
     password = os.environ.get("CC_PASS") or ask("Password: ", "set CC_PASS", hidden=True)
     cc = CatalystCenter(args.host, user, password, verify=not args.insecure)
 
-    template_id, version_id, version, project = find_template(cc, args.template, args.project)
-    print(f"Template '{args.template}' version {version}")
+    if not args.save_only:
+        template_id, version_id, version, project = find_template(cc, args.template,
+                                                                  args.project)
+        print(f"Template '{args.template}' version {version}")
 
     # Collect target devices, keyed by UUID so duplicates are dropped
     devices = {}
@@ -746,7 +755,9 @@ def main():
     if not devices:
         sys.exit("No devices to deploy to")
 
-    if args.skip_profile_check:
+    if args.save_only:
+        pass  # Nothing is deployed, so there's no template to check
+    elif args.skip_profile_check:
         print("\nSkipping the network profile check (--skip-profile-check).")
     else:
         check_profiles(cc, template_id, args.template, project, devices, device_site,
@@ -772,32 +783,46 @@ def main():
         print(f"\n{len(ordered)} target device(s):")
     print_table(rows, columns, highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
 
-    targets = []
-    for d in devices.values():
-        own = (per_device.get(d.get("hostname"))
-               or per_device.get(d.get("managementIpAddress")) or {})
-        targets.append({
-            "type": "MANAGED_DEVICE_UUID",
-            "id": d["id"],
-            "versionedTemplateId": version_id,
-            "params": {**common, **own},
-        })
+    if args.save_only:
+        word = "saved"
+        question = f"Save config (write memory) on {len(ordered)} device(s)"
 
-    print_params(targets, devices)
+        def run(batch):
+            ids = [d["id"] for d in batch]
+            save_config(cc, ids, devices, args.timeout)
+            return ids
+    else:
+        targets = []
+        for d in devices.values():
+            own = (per_device.get(d.get("hostname"))
+                   or per_device.get(d.get("managementIpAddress")) or {})
+            targets.append({
+                "type": "MANAGED_DEVICE_UUID",
+                "id": d["id"],
+                "versionedTemplateId": version_id,
+                "params": {**common, **own},
+            })
 
-    by_id = {t["id"]: t for t in targets}
-    if args.debug:
-        print("\nDeploy request:")
-        print(json.dumps(deploy_body(template_id, args.force, targets), indent=2))
+        print_params(targets, devices)
+
+        by_id = {t["id"]: t for t in targets}
+        if args.debug:
+            print("\nDeploy request:")
+            print(json.dumps(deploy_body(template_id, args.force, targets), indent=2))
+        word = "deployed"
+        question = f"Deploy '{args.template}' v{version} to {len(targets)} device(s)"
+
+        def run(batch):
+            return deploy(cc, args, template_id, version_id,
+                          [by_id[d["id"]] for d in batch], devices)
 
     if args.dry_run:
-        print("\nDry run, nothing deployed.")
+        print(f"\nDry run, nothing {word}.")
         return
 
     if not args.yes:
         in_batches = f" in {len(batches)} batches" if len(batches) > 1 else ""
-        answer = ask(f"\nDeploy '{args.template}' v{version} to {len(targets)} "
-                     f"device(s){in_batches}? [y/N] ", "pass --yes to deploy without asking")
+        answer = ask(f"\n{question}{in_batches}? [y/N] ", "pass --yes to run without asking")
         if answer.strip().lower() != "y":
             sys.exit("Aborted")
 
@@ -806,15 +831,15 @@ def main():
         if len(batches) > 1:
             names = ", ".join(d.get("hostname") or d["id"] for d in batch)
             print(f"\n=== Batch {n} of {len(batches)}: {names}")
-        deployed = deploy(cc, args, template_id, version_id,
-                          [by_id[d["id"]] for d in batch], devices)
+        done = run(batch)
         rest = [d for b in batches[n:] for d in b]
         if not rest:
             break
-        if len(deployed) < len(batch):
-            print(f"\nBatch {n} deployed to {len(deployed)} of {len(batch)} device(s).")
+        if len(done) < len(batch):
+            print(f"\nBatch {n} {word} on {len(done)} of {len(batch)} device(s).")
             if not ask_between:
-                stop(rest, f"Stopping after batch {n}, as not every device in it was deployed")
+                stop(rest, f"Stopping after batch {n}, as not every device in it was {word}",
+                     word)
         if ask_between:
             answer = ask(f"\nContinue with batch {n + 1} ({len(batches[n])} device(s))? "
                          "[y/N/a=all remaining] ", "pass --yes to run all batches without asking")
@@ -822,12 +847,12 @@ def main():
             if answer == "a":
                 ask_between = False
             elif answer != "y":
-                stop(rest, "Stopped")
+                stop(rest, "Stopped", word)
 
 
-def stop(rest, why):
-    """End a batched deploy early, listing the devices that weren't deployed to."""
-    print(f"\n{why}. Not deployed to {len(rest)} device(s):")
+def stop(rest, why, word="deployed"):
+    """End a batched run early, listing the devices it didn't get to."""
+    print(f"\n{why}. Not {word} on {len(rest)} device(s):")
     print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in rest],
                 ["Hostname", "Management IP"])
     sys.exit(1)
