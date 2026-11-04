@@ -72,6 +72,9 @@ covers each device. It also stops when the
 template isn't in any profile, or when CC can't list a profile's templates
 (2.3.7.9 and later can). `--dry-run` runs the check too.
 
+`--only-covered` skips the devices on uncovered sites instead of stopping, and
+deploys to the rest. They're listed with their site, as when it stops.
+
 `--skip-profile-check` turns the check off, e.g. for a one-off template that
 isn't in a profile.
 
