@@ -534,8 +534,10 @@ def report_progress(progress, devices, target_ids):
     for note in notes:
         print(f"\nCC: {note}")
 
-    if "Hence not deploying" in progress.rsplit(":", 1)[-1] or progress.rstrip().endswith(
-            "Hence not deploying"):
+    # 3.2.3 leaves the device list empty ("...on devices:.") and ends with
+    # "Template has no clis to push hence not deploying template", in lower case
+    if "hence not deploying" in progress.rsplit(":", 1)[-1].lower() or (
+            progress.rstrip().lower().endswith("hence not deploying")):
         hint = " Use --force to push again." if "already deployed" in progress else ""
         print(f"\nResult: nothing was deployed.{hint}")
         return []
