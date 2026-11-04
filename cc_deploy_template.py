@@ -609,7 +609,9 @@ def wait_deployment(cc, deployment_id, timeout):
         if not r.ok:
             sys.exit(f"GET {path} failed: {r.status_code} {r.text}")
         status = r.json()
-        if status.get("status") not in ("INIT", "IN_PROGRESS", None):
+        # An empty endTime: still running (3.2.3 sets it when the devices are done)
+        if (status.get("status") not in ("INIT", "IN_PROGRESS", None)
+                and status.get("endTime", "-") != ""):
             return status
         time.sleep(5)
     sys.exit("Timed out waiting for deployment")
@@ -971,20 +973,28 @@ def deploy_request(cc, args, template_id, version_id, targets, devices):
     text = re.sub(r"\[[^\]]*(\]|$)|\{[^}]*\}", "", f"{progress} {task.get('data', '')}")
     known = {template_id, version_id, *devices}
     candidates = [u for u in UUID_RE.findall(text) if u not in known]
-    deployed = None
+    # 3.2.3 labels it when something was deployed: "Template Deployemnt Id: <uuid>"
+    labelled = re.search(r"Deploy\w* Id:\s*(" + UUID_RE.pattern + ")", progress, re.I)
+    if labelled:
+        candidates.insert(0, labelled.group(1))
     if candidates:
         status = wait_deployment(cc, candidates[0], args.timeout)
         if status is not None:
             print(f"Deployment status: {status.get('status')}")
-            deployed = []
+            deployed, already = [], []
             for dev in status.get("devices", []):
-                print(f"  {dev.get('name')}: {dev.get('status')} "
-                      f"{dev.get('detailedStatusMessage', '')}")
-                if dev.get("status") == "SUCCESS" and dev.get("deviceId"):
-                    deployed.append(dev["deviceId"])
-
-    if deployed is not None:
-        return deployed, [], True
+                uuid = dev.get("deviceId")
+                # 3.2.3 leaves name and IP empty for devices it skipped
+                name = dev.get("name") or devices.get(uuid, {}).get("hostname") or uuid
+                print(f"  {name}: {dev.get('status')} {dev.get('detailedStatusMessage') or ''}")
+                if dev.get("status") != "SUCCESS" or not uuid:
+                    continue
+                # Skipped devices are SUCCESS too, with "Template already deployed"
+                if "already deployed" in (dev.get("detailedStatusMessage") or "").lower():
+                    already.append(uuid)
+                else:
+                    deployed.append(uuid)
+            return deployed, already, True
     ids = [t["id"] for t in targets]
     if len(progress) >= PROGRESS_MAX - 3:
         # Cut off despite request_size, e.g. other wording: don't trust the end
