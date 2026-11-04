@@ -46,6 +46,7 @@ Features:
 - Stops if the template isn't in a network profile assigned to the targets' sites (directly or through a composite)
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
+- Prints when it started, and on any exit when it finished and how long it took
 - Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
 - `--save-only` writes memory on the targets without deploying, e.g. after a deploy whose save didn't run
 
