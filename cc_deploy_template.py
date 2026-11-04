@@ -478,7 +478,7 @@ def parse_kv(items):
     return out
 
 
-def report_progress(progress, devices):
+def report_progress(progress, devices, target_ids):
     """Print CC's applicable / non-applicable targets as readable lists.
 
     CC's text looks like:
@@ -495,8 +495,11 @@ def report_progress(progress, devices):
         for key, reason in re.findall(r"([^,=\s][^,=]*)=(.*?)(?=,\s*[^,=\s][^,=]*=|$)", m.group(1)):
             skipped[key.strip()] = reason.strip()
 
-    m = re.search(r"(?<![a-z])ApplicableTargets:\s*(\[[^\]]*\]|\{[^}]*\}|None)", progress)
+    # An open [ at the end: CC cut the text off inside the list
+    m = re.search(r"(?<![a-z])ApplicableTargets:\s*(\[[^\]]*\]|\{[^}]*\}|None|\[[^\]]*$)",
+                  progress)
     applicable = UUID_RE.findall(m.group(1)) if m else []
+    cut = bool(m) and m.group(1).startswith("[") and not m.group(1).endswith("]")
 
     # Messages like "Template x:14 is already deployed with same params, Hence not deploying"
     notes = list(dict.fromkeys(
@@ -510,6 +513,16 @@ def report_progress(progress, devices):
     for part in re.findall(r"Hence not deploying on devices:\s*(\[[^\]]*\]|[0-9a-f\-, ]*)", progress):
         for uuid in UUID_RE.findall(part):
             skipped.setdefault(uuid, "not deployed")
+
+    if cut:
+        # CC 3.2.3 cuts the task text at about 1000 characters, so a batch of
+        # more than ~24 devices ends mid-list. Non-applicable devices are named
+        # before the list, so the rest of the batch passed the check too.
+        rest = [u for u in target_ids if u not in applicable and u not in skipped]
+        print(f"\nCC's task text was cut off after {len(applicable)} device(s). CC named "
+              f"{len(skipped) or 'no'} device(s) as not applicable before that, so the other "
+              f"{len(rest)} in this batch are counted as deployed too.")
+        applicable += rest
 
     print(f"\nPassed CC's target check, {len(applicable)} device(s):")
     for uuid in applicable:
@@ -841,7 +854,7 @@ def deploy(cc, args, template_id, version_id, targets, devices):
     if args.debug:
         print(f"\nTask progress: {progress}\nTask data: {task.get('data', '')}")
     # Look for a deployment ID outside the target lists, ignoring known template/device IDs
-    text = re.sub(r"\[[^\]]*\]|\{[^}]*\}", "", f"{progress} {task.get('data', '')}")
+    text = re.sub(r"\[[^\]]*(\]|$)|\{[^}]*\}", "", f"{progress} {task.get('data', '')}")
     known = {template_id, version_id, *devices}
     candidates = [u for u in UUID_RE.findall(text) if u not in known]
     deployed = None
@@ -858,7 +871,7 @@ def deploy(cc, args, template_id, version_id, targets, devices):
 
     confirmed = deployed is not None
     if not confirmed:
-        deployed = report_progress(progress, devices)
+        deployed = report_progress(progress, devices, [t["id"] for t in targets])
         if deployed and args.save:
             # CC's task ends when the deploy is handed off, not when devices are done
             print(f"\nCan't confirm the deploy has finished, waiting {args.save_wait}s "
