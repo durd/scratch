@@ -131,7 +131,11 @@ several small deploy requests, sized from the template name so CC's answer
 fits (6 devices for a short name), and saves the batch once at the end. If an
 answer is cut off anyway, its devices are counted as deployed and saved.
 
-In a request with both new and already-deployed devices, CC doesn't say which
+When CC deploys something, it also gives a deployment ID. The script then reads
+the result per device: deployed, already on this version, or failed. It saves
+the deployed ones as soon as CC says they're done, without the fixed
+`--save-wait` pause. Without a deployment ID it goes by the task text. In a
+request with both new and already-deployed devices, that text doesn't say which
 were skipped, so all of them are saved. That's harmless, just an extra write
 memory.
 
