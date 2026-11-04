@@ -827,27 +827,40 @@ def main():
             sys.exit("Aborted")
 
     ask_between = not args.yes
+    skipped, skip = [], False
     for n, batch in enumerate(batches, 1):
-        if len(batches) > 1:
-            names = ", ".join(d.get("hostname") or d["id"] for d in batch)
-            print(f"\n=== Batch {n} of {len(batches)}: {names}")
-        done = run(batch)
+        names = ", ".join(d.get("hostname") or d["id"] for d in batch)
+        if skip:
+            print(f"\n=== Batch {n} of {len(batches)}: skipped ({names})")
+            skipped += batch
+        else:
+            if len(batches) > 1:
+                print(f"\n=== Batch {n} of {len(batches)}: {names}")
+            done = run(batch)
         rest = [d for b in batches[n:] for d in b]
         if not rest:
             break
-        if len(done) < len(batch):
+        if not skip and len(done) < len(batch):
             print(f"\nBatch {n} {word} on {len(done)} of {len(batch)} device(s).")
             if not ask_between:
-                stop(rest, f"Stopping after batch {n}, as not every device in it was {word}",
-                     word)
+                stop(skipped + rest,
+                     f"Stopping after batch {n}, as not every device in it was {word}", word)
+        skip = False
         if ask_between:
             answer = ask(f"\nContinue with batch {n + 1} ({len(batches[n])} device(s))? "
-                         "[y/N/a=all remaining] ", "pass --yes to run all batches without asking")
+                         "[y/N/a=all remaining/s=skip it] ",
+                         "pass --yes to run all batches without asking")
             answer = answer.strip().lower()
             if answer == "a":
                 ask_between = False
+            elif answer == "s":
+                skip = True
             elif answer != "y":
-                stop(rest, "Stopped", word)
+                stop(skipped + rest, "Stopped", word)
+    if skipped:
+        print(f"\nSkipped, not {word} on {len(skipped)} device(s):")
+        print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in skipped],
+                    ["Hostname", "Management IP"])
 
 
 def stop(rest, why, word="deployed"):
