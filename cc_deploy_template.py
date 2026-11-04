@@ -534,8 +534,10 @@ def report_progress(progress, devices, target_ids):
     for note in notes:
         print(f"\nCC: {note}")
 
-    if "Hence not deploying" in progress.rsplit(":", 1)[-1] or progress.rstrip().endswith(
-            "Hence not deploying"):
+    # 3.2.3 leaves the device list empty ("...on devices:.") and ends with
+    # "Template has no clis to push hence not deploying template", in lower case
+    if "hence not deploying" in progress.rsplit(":", 1)[-1].lower() or (
+            progress.rstrip().lower().endswith("hence not deploying")):
         hint = " Use --force to push again." if "already deployed" in progress else ""
         print(f"\nResult: nothing was deployed.{hint}")
         return []
@@ -559,13 +561,16 @@ def save_config(cc, ids, devices, timeout):
 
 
 def wait_task(cc, task_id, timeout):
+    """Wait for a CC task to end and return its details (progress, data)."""
+    # /tasks/{id} replaces /task/{id}, which is sunset since 2.3.7.6
     end = time.time() + timeout
     while time.time() < end:
-        task = cc.get(f"/dna/intent/api/v1/task/{task_id}")["response"]
-        if task.get("isError"):
-            sys.exit(f"Task failed: {task.get('failureReason') or task.get('progress')}")
-        if task.get("endTime"):
-            return task
+        task = cc.get(f"/dna/intent/api/v1/tasks/{task_id}").get("response") or {}
+        if task.get("status") in ("SUCCESS", "FAILURE") or task.get("endTime"):
+            detail = cc.get(f"/dna/intent/api/v1/tasks/{task_id}/detail").get("response") or {}
+            if task.get("status") == "FAILURE":
+                sys.exit(f"Task failed: {detail.get('failureReason') or detail.get('progress')}")
+            return detail
         time.sleep(3)
     sys.exit("Timed out waiting for task")
 
@@ -827,27 +832,40 @@ def main():
             sys.exit("Aborted")
 
     ask_between = not args.yes
+    skipped, skip = [], False
     for n, batch in enumerate(batches, 1):
-        if len(batches) > 1:
-            names = ", ".join(d.get("hostname") or d["id"] for d in batch)
-            print(f"\n=== Batch {n} of {len(batches)}: {names}")
-        done = run(batch)
+        names = ", ".join(d.get("hostname") or d["id"] for d in batch)
+        if skip:
+            print(f"\n=== Batch {n} of {len(batches)}: skipped ({names})")
+            skipped += batch
+        else:
+            if len(batches) > 1:
+                print(f"\n=== Batch {n} of {len(batches)}: {names}")
+            done = run(batch)
         rest = [d for b in batches[n:] for d in b]
         if not rest:
             break
-        if len(done) < len(batch):
+        if not skip and len(done) < len(batch):
             print(f"\nBatch {n} {word} on {len(done)} of {len(batch)} device(s).")
             if not ask_between:
-                stop(rest, f"Stopping after batch {n}, as not every device in it was {word}",
-                     word)
+                stop(skipped + rest,
+                     f"Stopping after batch {n}, as not every device in it was {word}", word)
+        skip = False
         if ask_between:
             answer = ask(f"\nContinue with batch {n + 1} ({len(batches[n])} device(s))? "
-                         "[y/N/a=all remaining] ", "pass --yes to run all batches without asking")
+                         "[y/N/a=all remaining/s=skip it] ",
+                         "pass --yes to run all batches without asking")
             answer = answer.strip().lower()
             if answer == "a":
                 ask_between = False
+            elif answer == "s":
+                skip = True
             elif answer != "y":
-                stop(rest, "Stopped", word)
+                stop(skipped + rest, "Stopped", word)
+    if skipped:
+        print(f"\nSkipped, not {word} on {len(skipped)} device(s):")
+        print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in skipped],
+                    ["Hostname", "Management IP"])
 
 
 def stop(rest, why, word="deployed"):

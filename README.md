@@ -105,8 +105,9 @@ Filters only narrow the targets from `--device` and `--site`. Matching ignores c
 `--batches 1,2,4` deploys in batches of 1, 2, then 4 devices at a time (the last
 size repeats), in hostname order.
 
-- After each batch it asks `Continue? [y/N/a]`. `a` runs the rest, `N` stops and
-  lists what's left.
+- After each batch it asks `Continue? [y/N/a/s]`. `a` runs the rest, `N` stops and
+  lists what's left, `s` skips the next batch and asks again about the one after.
+  Skipped devices are listed at the end.
 - With `--yes` it doesn't ask, but stops if a batch didn't reach all its devices.
 - Each batch is saved before the next one starts.
 
