@@ -108,7 +108,9 @@ size repeats), in hostname order.
 - After each batch it asks `Continue? [y/N/a/s]`. `a` runs the rest, `N` stops and
   lists what's left, `s` skips the next batch and asks again about the one after.
   Skipped devices are listed at the end.
-- With `--yes` it doesn't ask, but stops if a batch didn't reach all its devices.
+- With `--yes`, or after `a`, it doesn't ask, but stops if a batch didn't reach all its
+  devices. Devices CC skips as already on this template version count as reached;
+  they aren't saved again.
 - Each batch is saved before the next one starts.
 
 #### Saving without deploying

@@ -482,6 +482,8 @@ def parse_kv(items):
 def report_progress(progress, devices, target_ids):
     """Print CC's applicable / non-applicable targets as readable lists.
 
+    Returns (deployed IDs, IDs CC skipped as already on this template version).
+
     CC's text looks like:
       ...nonApplicableTargets: {<uuid>=<reason>, ...}.ApplicableTargets: [<uuid>, ...]...
     Falls back to the raw text if that format isn't found.
@@ -508,12 +510,16 @@ def report_progress(progress, devices, target_ids):
 
     if not skipped and not m:
         print(f"Task done: {progress}")
-        return []
+        return [], []
 
     # Devices named after "Hence not deploying on devices:" were skipped too
+    # (2.3.7.11 names them, 3.2.3 doesn't)
+    named = []
     for part in re.findall(r"Hence not deploying on devices:\s*(\[[^\]]*\]|[0-9a-f\-, ]*)", progress):
         for uuid in UUID_RE.findall(part):
             skipped.setdefault(uuid, "not deployed")
+            named.append(uuid)
+    current = named if "already deployed" in progress else []
 
     if cut:
         # CC 3.2.3 cuts the task text at about 1000 characters, so a batch of
@@ -549,10 +555,14 @@ def report_progress(progress, devices, target_ids):
             progress.rstrip().lower().endswith("hence not deploying")):
         hint = " Use --force to push again." if "already deployed" in progress else ""
         print(f"\nResult: nothing was deployed.{hint}")
-        return []
+        # 3.2.3: one "already deployed" per device, so all of them if there are enough
+        rest = [u for u in applicable if u not in skipped]
+        if not current and len(re.findall(r"already deployed with same params", progress)) >= len(rest):
+            current = rest
+        return [], current
     else:
         print("\nResult: deploy started for the devices above. Check Deployment History in CC.")
-        return [u for u in applicable if u not in skipped]
+        return [u for u in applicable if u not in skipped], current
 
 
 def save_config(cc, ids, devices, timeout):
@@ -906,20 +916,26 @@ def request_size(name, version):
 
 
 def deploy(cc, args, template_id, version_id, version, targets, devices):
-    """Deploy to targets, wait for the result and save config. Returns deployed device IDs.
+    """Deploy to targets, wait for the result and save config.
+
+    Returns the IDs of devices deployed to or already on this version (not saved again).
 
     Sends the targets in several small deploy requests, as CC 3.2.3 cuts off the
     reply of a large one, and then saves once.
     """
     size = request_size(args.template, version)
     parts = [targets[i:i + size] for i in range(0, len(targets), size)]
-    deployed, confirmed = [], True
+    deployed, current, confirmed = [], [], True
     for n, part in enumerate(parts, 1):
         if len(parts) > 1:
             print(f"\n--- Deploy request {n} of {len(parts)} ({len(part)} device(s))")
-        done, ok = deploy_request(cc, args, template_id, version_id, part, devices)
+        done, already, ok = deploy_request(cc, args, template_id, version_id, part, devices)
         deployed += done
+        current += already
         confirmed = confirmed and ok
+    if current:
+        print(f"\nDeployed on {len(deployed)}, already on version {version}: {len(current)}, "
+              f"of {len(targets)} device(s).")
 
     if not confirmed and deployed and args.save:
         # CC's task ends when the deploy is handed off, not when devices are done
@@ -934,11 +950,14 @@ def deploy(cc, args, template_id, version_id, version, targets, devices):
                   "confirmed deploy. If a device was still applying the template, part "
                   "of it may be unsaved. Check Deployment History in CC, and raise "
                   "--save-wait for slow devices.")
-    return deployed
+    return deployed + current
 
 
 def deploy_request(cc, args, template_id, version_id, targets, devices):
-    """One deploy request. Returns (deployed device IDs, whether CC confirmed them)."""
+    """One deploy request.
+
+    Returns (deployed IDs, IDs already on this version, whether CC confirmed the deploy).
+    """
     body = deploy_body(template_id, args.force, targets)
     resp = cc.post("/dna/intent/api/v2/template-programmer/template/deploy", body)
     task_id = resp["response"]["taskId"]
@@ -965,15 +984,16 @@ def deploy_request(cc, args, template_id, version_id, targets, devices):
                     deployed.append(dev["deviceId"])
 
     if deployed is not None:
-        return deployed, True
+        return deployed, [], True
     ids = [t["id"] for t in targets]
     if len(progress) >= PROGRESS_MAX - 3:
         # Cut off despite request_size, e.g. other wording: don't trust the end
         print(f"\nCC's reply was cut off, so all {len(ids)} device(s) of this request are "
               "counted as deployed.")
         report_progress(progress, devices, ids)
-        return ids, False
-    return report_progress(progress, devices, ids), False
+        return ids, [], False
+    done, already = report_progress(progress, devices, ids)
+    return done, already, False
 
 
 if __name__ == "__main__":
