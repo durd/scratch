@@ -42,6 +42,7 @@ Per-device params (--params-file), keyed by hostname or management IP:
   {"sw01.example.com": {"vlan": 10}, "10.1.1.11": {"vlan": 20}}
 """
 import argparse
+import atexit
 import fnmatch
 import getpass
 import ipaddress
@@ -50,6 +51,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 
 import requests
 import urllib3
@@ -617,6 +619,19 @@ def wait_deployment(cc, deployment_id, timeout):
     sys.exit("Timed out waiting for deployment")
 
 
+def stamp(t):
+    """Local date and time with its time zone, e.g. 2026-11-04 14:05:12 CET."""
+    return datetime.fromtimestamp(t).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def finished(started):
+    """Print when the run ended and how long it took."""
+    h, rest = divmod(int(time.time() - started), 3600)
+    m, s = divmod(rest, 60)
+    took = f"{h}h {m}m {s}s" if h else f"{m}m {s}s" if m else f"{s}s"
+    print(f"\nFinished {stamp(time.time())}, took {took}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -686,6 +701,11 @@ def main():
         p.error("--template is required, unless --save-only")
     if args.save_only and not args.save:
         p.error("--save-only and --no-save don't go together")
+
+    started = time.time()
+    print(f"Started {stamp(started)}")
+    # Also on sys.exit() and Ctrl-C, so a stopped run shows when and how long too
+    atexit.register(finished, started)
 
     if args.insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
