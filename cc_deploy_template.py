@@ -532,8 +532,16 @@ def report_progress(progress, devices, target_ids):
         print(f"\nNot applicable, {len(skipped)} device(s):")
         for key, reason in skipped.items():
             print(f"  {label(key)}: {reason}")
+    # 3.2.3 repeats the note once per skipped device, without naming the device
     for note in notes:
-        print(f"\nCC: {note}")
+        count = re.findall(re.escape(note) + r", Hence not deploying on devices:", progress)
+        if len(count) > 1 or not UUID_RE.search(progress.split(note, 1)[1]):
+            ids = [u for u in target_ids if u in applicable]
+            which = ("all of them" if len(count) >= len(ids)
+                     else f"CC doesn't say which, so all {len(ids)} are counted as deployed")
+            print(f"\nCC: {note}, on {len(count)} of {len(ids)} device(s) ({which})")
+        else:
+            print(f"\nCC: {note}")
 
     # 3.2.3 leaves the device list empty ("...on devices:.") and ends with
     # "Template has no clis to push hence not deploying template", in lower case
