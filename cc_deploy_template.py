@@ -253,11 +253,13 @@ def template_profiles(cc, template_id, name, project):
     return found if answered or not profiles else None
 
 
-def check_profiles(cc, template_id, name, project, devices, device_site, debug=False):
-    """Exit unless every device sits on a site covered by a profile the template is in.
+def check_profiles(cc, template_id, name, project, devices, device_site, debug=False,
+                   only_covered=False):
+    """Check every device sits on a site covered by a profile the template is in.
 
-    device_site has the site ID for devices found through --site; the others are
-    looked up.
+    Exits if one doesn't, or with only_covered returns the IDs of those that
+    don't, to be skipped. device_site has the site ID for devices found through
+    --site; the others are looked up.
     """
     print("\nChecking the template's network profiles...")
     how = "skip the check with --skip-profile-check"
@@ -308,8 +310,14 @@ def check_profiles(cc, template_id, name, project, devices, device_site, debug=F
                     ["Hostname", "Management IP", "Site"])
         if not allowed:
             print("\nThe profiles aren't assigned to any site.")
-        sys.exit(f"Template '{name}' doesn't belong on those sites; {how}")
+        if only_covered:
+            print(f"Skipping them (--only-covered), {len(devices) - len(outside)} device(s) "
+                  "left.")
+            return {d["id"] for d, _ in outside}
+        sys.exit(f"Template '{name}' doesn't belong on those sites; skip those devices "
+                 f"with --only-covered, or {how}")
     print(f"  All {len(devices)} device(s) are on sites these profiles are assigned to")
+    return set()
 
 
 def device_records(cc, ids):
@@ -657,6 +665,9 @@ def main():
     p.add_argument("--skip-profile-check", action="store_true",
                    help="Deploy even to devices on sites the template's network profiles "
                         "(directly or via a composite) aren't assigned to")
+    p.add_argument("--only-covered", action="store_true",
+                   help="Skip devices on sites the template's network profiles aren't "
+                        "assigned to, instead of stopping")
     p.add_argument("--force", action="store_true",
                    help="Force push, even to devices already on this template version")
     p.add_argument("--save", action=argparse.BooleanOptionalAction, default=True,
@@ -686,6 +697,8 @@ def main():
         p.error("--template is required, unless --save-only")
     if args.save_only and not args.save:
         p.error("--save-only and --no-save don't go together")
+    if args.only_covered and args.skip_profile_check:
+        p.error("--only-covered and --skip-profile-check don't go together")
 
     if args.insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -786,8 +799,11 @@ def main():
     elif args.skip_profile_check:
         print("\nSkipping the network profile check (--skip-profile-check).")
     else:
-        check_profiles(cc, template_id, args.template, project, devices, device_site,
-                       args.debug)
+        uncovered = check_profiles(cc, template_id, args.template, project, devices,
+                                   device_site, args.debug, args.only_covered)
+        devices = {k: d for k, d in devices.items() if k not in uncovered}
+        if not devices:
+            sys.exit("No devices to deploy to")
 
     ordered = sorted(devices.values(), key=lambda d: d.get("hostname") or "")
     batches = split_batches(ordered, args.batches) if args.batches else [ordered]
