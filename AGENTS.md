@@ -48,7 +48,7 @@ These scripts change production network devices and delete backups.
 - Catalyst Center API responses vary between releases. Handle missing fields
   defensively (`.get()`), and note in a comment which release a workaround is for
   if you know it. `cc_deploy_template.py` is tested against Catalyst Center
-  2.3.7.11; changes must keep working there.
+  3.2.3; changes must keep working there.
 
 ## Commits
 
