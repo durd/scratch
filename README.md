@@ -122,10 +122,19 @@ Use it when a deploy went through but the save didn't. Running the deploy
 again won't save those devices: CC skips them as already on that template
 version, and the script only saves devices it deployed to.
 
-CC 3.2.3 cuts its deploy task text off at about 1000 characters, which in a
-batch of more than ~24 devices ends inside the list of deployed devices. The
-script then counts the rest of the batch as deployed, unless CC named a device
-as not applicable before the list, and says so in its output.
+CC 3.2.3 cuts its deploy task text off at 1023 characters. That text is the
+only place CC says which devices it deployed to and which it skipped as
+already on that template version. So the script sends each batch to CC in
+several small deploy requests, sized from the template name so CC's answer
+fits (6 devices for a short name), and saves the batch once at the end. If an
+answer is cut off anyway, its devices are counted as deployed and saved.
+
+In a request with both new and already-deployed devices, CC doesn't say which
+were skipped, so all of them are saved. That's harmless, just an extra write
+memory.
+
+Batches of about 10 devices have worked well on 3.2.3. Batches of 30 devices
+that already had the template were very slow or never finished.
 
 Example:
 

@@ -57,6 +57,7 @@ import urllib3
 if sys.version_info < (3, 12):
     sys.exit(f"Needs Python 3.12 or newer, this is {sys.version.split()[0]}")
 
+PROGRESS_MAX = 1023  # CC 3.2.3 cuts task progress text at this length
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 DEVICE_PATH = "/dna/intent/api/v1/network-device"
 TEMPLATE_PATH = "/dna/intent/api/v1/template-programmer/template"
@@ -818,7 +819,7 @@ def main():
         question = f"Deploy '{args.template}' v{version} to {len(targets)} device(s)"
 
         def run(batch):
-            return deploy(cc, args, template_id, version_id,
+            return deploy(cc, args, template_id, version_id, version,
                           [by_id[d["id"]] for d in batch], devices)
 
     if args.dry_run:
@@ -885,8 +886,51 @@ def deploy_body(template_id, force, targets):
     }
 
 
-def deploy(cc, args, template_id, version_id, targets, devices):
-    """Deploy to targets, wait for the result and save config. Returns deployed device IDs."""
+def request_size(name, version):
+    """Devices per deploy request, so CC's whole reply fits in its task progress text.
+
+    CC 3.2.3 cuts the progress at 1023 characters. Per device it can hold the
+    device ID (38) and, if the device already has this version, 81 characters
+    plus "<name>:<version>". Around them are about 141 characters. Rounded up
+    for some margin.
+    """
+    return max(1, (PROGRESS_MAX - 150) // (120 + len(f"{name}:{version}")))
+
+
+def deploy(cc, args, template_id, version_id, version, targets, devices):
+    """Deploy to targets, wait for the result and save config. Returns deployed device IDs.
+
+    Sends the targets in several small deploy requests, as CC 3.2.3 cuts off the
+    reply of a large one, and then saves once.
+    """
+    size = request_size(args.template, version)
+    parts = [targets[i:i + size] for i in range(0, len(targets), size)]
+    deployed, confirmed = [], True
+    for n, part in enumerate(parts, 1):
+        if len(parts) > 1:
+            print(f"\n--- Deploy request {n} of {len(parts)} ({len(part)} device(s))")
+        done, ok = deploy_request(cc, args, template_id, version_id, part, devices)
+        deployed += done
+        confirmed = confirmed and ok
+
+    if not confirmed and deployed and args.save:
+        # CC's task ends when the deploy is handed off, not when devices are done
+        print(f"\nCan't confirm the deploy has finished, waiting {args.save_wait}s "
+              "before saving...")
+        time.sleep(args.save_wait)
+
+    if args.save:
+        save_config(cc, deployed, devices, args.timeout)
+        if deployed and not confirmed:
+            print(f"\nWarning: the save ran after a fixed {args.save_wait}s wait, not a "
+                  "confirmed deploy. If a device was still applying the template, part "
+                  "of it may be unsaved. Check Deployment History in CC, and raise "
+                  "--save-wait for slow devices.")
+    return deployed
+
+
+def deploy_request(cc, args, template_id, version_id, targets, devices):
+    """One deploy request. Returns (deployed device IDs, whether CC confirmed them)."""
     body = deploy_body(template_id, args.force, targets)
     resp = cc.post("/dna/intent/api/v2/template-programmer/template/deploy", body)
     task_id = resp["response"]["taskId"]
@@ -912,23 +956,16 @@ def deploy(cc, args, template_id, version_id, targets, devices):
                 if dev.get("status") == "SUCCESS" and dev.get("deviceId"):
                     deployed.append(dev["deviceId"])
 
-    confirmed = deployed is not None
-    if not confirmed:
-        deployed = report_progress(progress, devices, [t["id"] for t in targets])
-        if deployed and args.save:
-            # CC's task ends when the deploy is handed off, not when devices are done
-            print(f"\nCan't confirm the deploy has finished, waiting {args.save_wait}s "
-                  "before saving...")
-            time.sleep(args.save_wait)
-
-    if args.save:
-        save_config(cc, deployed, devices, args.timeout)
-        if deployed and not confirmed:
-            print(f"\nWarning: the save ran after a fixed {args.save_wait}s wait, not a "
-                  "confirmed deploy. If a device was still applying the template, part "
-                  "of it may be unsaved. Check Deployment History in CC, and raise "
-                  "--save-wait for slow devices.")
-    return deployed
+    if deployed is not None:
+        return deployed, True
+    ids = [t["id"] for t in targets]
+    if len(progress) >= PROGRESS_MAX - 3:
+        # Cut off despite request_size, e.g. other wording: don't trust the end
+        print(f"\nCC's reply was cut off, so all {len(ids)} device(s) of this request are "
+              "counted as deployed.")
+        report_progress(progress, devices, ids)
+        return ids, False
+    return report_progress(progress, devices, ids), False
 
 
 if __name__ == "__main__":
