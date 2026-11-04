@@ -47,6 +47,7 @@ Features:
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
 - Writes the deployed config to device memory by default, like CC provisioning (skip with `--no-save`)
+- `--save-only` writes memory on the targets without deploying, e.g. after a deploy whose save didn't run
 
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
@@ -108,6 +109,22 @@ size repeats), in hostname order.
   lists what's left.
 - With `--yes` it doesn't ask, but stops if a batch didn't reach all its devices.
 - Each batch is saved before the next one starts.
+
+#### Saving without deploying
+
+`--save-only` takes the same `--device`/`--site` targets, filters and `--batches`
+as a deploy, and only runs write memory on them. `--template` isn't needed, and
+`--dry-run` shows the devices it would save. Write memory saves everything
+in the running config, including changes not made by this script.
+
+Use it when a deploy went through but the save didn't. Running the deploy
+again won't save those devices: CC skips them as already on that template
+version, and the script only saves devices it deployed to.
+
+CC 3.2.3 cuts its deploy task text off at about 1000 characters, which in a
+batch of more than ~24 devices ends inside the list of deployed devices. The
+script then counts the rest of the batch as deployed, unless CC named a device
+as not applicable before the list, and says so in its output.
 
 Example:
 
