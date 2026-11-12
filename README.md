@@ -35,7 +35,7 @@ Tested against Catalyst Center 3.2.3. Other releases may return API responses
 the script doesn't expect, so start with `--dry-run` (and `--debug`) there.
 
 Features:
-- Target devices individually with `--device`
+- Target devices individually with `--device`, or from a file with `--device-file`
 - Target all devices under a site with `--site`
 - Optionally recurse below a site path with `--recursive`
 - Filter by device family with `--family`, device role (access, distribution, core, ...) with `--role`, and SNMP contact with `--contact`
@@ -84,7 +84,21 @@ you know is covered and one you know isn't.
 
 #### Choosing devices
 
-Filters only narrow the targets from `--device` and `--site`. Matching ignores case.
+`--device-file FILE` adds the devices in a file to the `--device` targets: one
+hostname or management IP per line, `#` comments allowed. Paths are cut to their
+last part, the hostname, so the output of `grep -l` over files named after the
+devices works as is (`./core/sw01.example.com` becomes `sw01.example.com`):
+
+```bash
+grep -rlPz --exclude-dir=.git 'ntp server 10\.9\.9\.9' . > devices.txt
+```
+
+`--device` and `--device-file` entries that aren't in CC's inventory, or match
+several devices, are listed with the reason and skipped, and the count is shown
+again below the target table. `--strict` stops instead.
+
+Filters only narrow the targets from `--device`, `--device-file` and `--site`.
+Matching ignores case.
 
 | Option | Matches |
 | --- | --- |
@@ -119,7 +133,7 @@ size repeats), in hostname order.
 
 #### Saving without deploying
 
-`--save-only` takes the same `--device`/`--site` targets, filters and `--batches`
+`--save-only` takes the same `--device`/`--device-file`/`--site` targets, filters and `--batches`
 as a deploy, and only runs write memory on them. `--template` isn't needed, and
 `--dry-run` shows the devices it would save. Write memory saves everything
 in the running config, including changes not made by this script.
@@ -170,6 +184,12 @@ Example:
   --site "Global/Area/Building/Floor 1" \
   --exclude-platform 2960S \
   --exclude-file not-provisioned.txt \
+  --dry-run
+
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Fix-NTP" \
+  --device-file devices.txt \
   --dry-run
 ```
 
