@@ -86,15 +86,12 @@ you know is covered and one you know isn't.
 
 `--device-file FILE` adds the devices in a file to the `--device` targets: one
 hostname or management IP per line, `#` comments allowed. Paths are cut to their
-last part, and the extensions `.cfg`, `.conf`, `.config`, `.txt` and `.log` are
-dropped, so the output of `grep -l` works as is (`./core/sw01.cfg` becomes `sw01`):
+last part, the hostname, so the output of `grep -l` over files named after the
+devices works as is (`./core/sw01.example.com` becomes `sw01.example.com`):
 
 ```bash
 grep -rlPz --exclude-dir=.git 'ntp server 10\.9\.9\.9' . > devices.txt
 ```
-
-Other extensions are kept, as anything after a dot could be part of the hostname.
-Such names show up as not found.
 
 `--device` and `--device-file` entries that aren't in CC's inventory, or match
 several devices, are listed with the reason and skipped, and the count is shown
