@@ -69,6 +69,8 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 DEVICE_PATH = "/dna/intent/api/v1/network-device"
 TEMPLATE_PATH = "/dna/intent/api/v1/template-programmer/template"
 PROFILE_PATH = "/dna/intent/api/v1/networkProfilesForSites"
+# Cut from --device-file entries; none of them is a domain suffix
+CONFIG_EXTENSIONS = (".cfg", ".conf", ".config", ".txt", ".log")
 
 
 class CatalystCenter:
@@ -420,13 +422,26 @@ def read_name_file(path, what):
     return [line for line in lines if line]
 
 
+def device_file_name(entry):
+    """'./core/sw01.cfg' -> 'sw01': the last path part, without a config file extension.
+
+    Only known extensions are cut, not anything after the last dot, as that would
+    turn 'sw01.lab' into 'sw01' and could match another device.
+    """
+    name = entry.rsplit("/", 1)[-1]
+    stem, dot, ext = name.rpartition(".")
+    if dot and stem and f".{ext.lower()}" in CONFIG_EXTENSIONS:
+        return stem
+    return name
+
+
 def read_device_file(path):
     """Devices to target, one per line.
 
-    Paths like './core/sw01' (e.g. from grep -l) are cut to the last part,
-    'sw01', as hostnames and IPs never contain '/'.
+    Paths like './core/sw01.cfg' (e.g. from grep -l) are cut to 'sw01', as
+    hostnames and IPs never contain '/'.
     """
-    names = [n.rsplit("/", 1)[-1] for n in read_name_file(path, "device")]
+    names = [device_file_name(n) for n in read_name_file(path, "device")]
     if not names:
         sys.exit(f"No devices in {path}")
     return names
@@ -671,7 +686,7 @@ def main():
                    help="Management IP or hostname as shown in inventory (repeatable)")
     p.add_argument("--device-file",
                    help="Target the devices in this file, one hostname or IP per line "
-                        "(# comments); paths like ./dir/sw01 are cut to sw01")
+                        "(# comments); paths like ./dir/sw01.cfg are cut to sw01")
     p.add_argument("--strict", action="store_true",
                    help="Stop if a --device or --device-file entry isn't found in CC "
                         "(default: list and skip it)")
