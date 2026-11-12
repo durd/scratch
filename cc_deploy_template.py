@@ -2,7 +2,8 @@
 r"""Push a single Day-N CLI template to devices via Catalyst Center.
 
 Only the template's config is pushed (no full device provision).
-Targets: individual devices (--device) and/or all devices on sites (--site).
+Targets: individual devices (--device, --device-file) and/or all devices on sites (--site).
+Devices that aren't found in CC's inventory are listed and skipped (--strict stops instead).
 
 Credentials: env vars CC_USER / CC_PASS, otherwise you are prompted.
 
@@ -12,6 +13,10 @@ Examples:
   # Two devices, by IP or hostname
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --device 10.1.1.10 --device sw02 --param ntp_server=10.0.0.1
+
+  # Devices listed in a file, e.g. from: grep -rlPz --exclude-dir=.git '...' . > devices.txt
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --device-file devices.txt --dry-run
 
   # Devices assigned directly to a building, switches only
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
@@ -124,7 +129,11 @@ def find_template(cc, name, project):
 
 
 def resolve_device(cc, name):
-    """Return the inventory record for a management IP or hostname ('name' or 'name.<domain>')."""
+    """Look up a management IP or hostname ('name' or 'name.<domain>') in inventory.
+
+    Returns (record, None), or (None, reason) when it isn't found or matches
+    several devices.
+    """
     try:
         ipaddress.ip_address(name)
         is_ip = True
@@ -134,18 +143,18 @@ def resolve_device(cc, name):
     if is_ip:
         devices = cc.get(DEVICE_PATH, managementIpAddress=name).get("response", [])
         if not devices:
-            sys.exit(f"No device with management IP {name} in inventory")
-        return devices[0]
+            return None, "no device with this management IP"
+        return devices[0], None
 
     devices = cc.get(DEVICE_PATH, hostname=name).get("response", [])
     if not devices:
         devices = cc.get(DEVICE_PATH, hostname=f"{re.escape(name)}\\..*").get("response", [])
     if len(devices) == 1:
-        return devices[0]
+        return devices[0], None
     if not devices:
-        sys.exit(f"Device '{name}' not found in inventory")
+        return None, "not found"
     found = ", ".join(d["hostname"] for d in devices)
-    sys.exit(f"Device '{name}' matches several devices ({found}), use the full hostname")
+    return None, f"matches several devices ({found}), use the full hostname"
 
 
 def find_site(cc, path):
@@ -401,14 +410,26 @@ def load_params_file(path):
     return data
 
 
-def read_exclude_file(path):
+def read_name_file(path, what):
     """Hostnames or IPs, one per line; blank lines and # comments are ignored."""
     try:
         with open(path) as f:
             lines = [line.split("#", 1)[0].strip() for line in f]
     except OSError as e:
-        sys.exit(f"Can't read exclude file {path}: {e}")
+        sys.exit(f"Can't read {what} file {path}: {e}")
     return [line for line in lines if line]
+
+
+def read_device_file(path):
+    """Devices to target, one per line.
+
+    Paths like './core/sw01' (e.g. from grep -l) are cut to the last part,
+    'sw01', as hostnames and IPs never contain '/'.
+    """
+    names = [n.rsplit("/", 1)[-1] for n in read_name_file(path, "device")]
+    if not names:
+        sys.exit(f"No devices in {path}")
+    return names
 
 
 def matches_name(d, name):
@@ -648,6 +669,12 @@ def main():
     p.add_argument("--project", help="Project name (if template name is not unique)")
     p.add_argument("--device", action="append", default=[],
                    help="Management IP or hostname as shown in inventory (repeatable)")
+    p.add_argument("--device-file",
+                   help="Target the devices in this file, one hostname or IP per line "
+                        "(# comments); paths like ./dir/sw01 are cut to sw01")
+    p.add_argument("--strict", action="store_true",
+                   help="Stop if a --device or --device-file entry isn't found in CC "
+                        "(default: list and skip it)")
     p.add_argument("--site", action="append", default=[],
                    help="Full site path, e.g. Global/Area/Building (repeatable)")
     p.add_argument("--recursive", action="store_true",
@@ -706,8 +733,8 @@ def main():
                    help="Print the JSON sent to CC and CC's raw task output")
     args = p.parse_args()
 
-    if not args.device and not args.site:
-        p.error("give at least one --device or --site")
+    if not args.device and not args.device_file and not args.site:
+        p.error("give at least one --device, --device-file or --site")
     if not args.template and not args.save_only:
         p.error("--template is required, unless --save-only")
     if args.save_only and not args.save:
@@ -723,11 +750,14 @@ def main():
     if args.insecure:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    # Read params before connecting, so a JSON mistake fails fast
+    # Read params and files before connecting, so a mistake fails fast
     common = parse_kv(args.param)
     per_device = load_params_file(args.params_file) if args.params_file else {}
-    exclude_names = args.exclude_device + (read_exclude_file(args.exclude_file)
+    exclude_names = args.exclude_device + (read_name_file(args.exclude_file, "exclude")
                                            if args.exclude_file else [])
+    # Same name twice (or in both --device and the file) is looked up once
+    device_names = list(dict.fromkeys(
+        args.device + (read_device_file(args.device_file) if args.device_file else [])))
 
     user = os.environ.get("CC_USER") or ask("Username: ", "set CC_USER")
     password = os.environ.get("CC_PASS") or ask("Password: ", "set CC_PASS", hidden=True)
@@ -741,9 +771,21 @@ def main():
     # Collect target devices, keyed by UUID so duplicates are dropped
     devices = {}
     device_site = {}  # Device ID -> site ID, for devices found through --site
-    for name in args.device:
-        d = resolve_device(cc, name)
-        devices[d["id"]] = d
+    if len(device_names) > 10:
+        print(f"Looking up {len(device_names)} device(s) in inventory...")
+    not_found = []
+    for name in device_names:
+        d, reason = resolve_device(cc, name)
+        if d:
+            devices[d["id"]] = d
+        else:
+            not_found.append((name, reason))
+    if not_found:
+        print(f"\n{len(not_found)} device(s) not matched in CC's inventory:")
+        print_table(not_found, ["Device", "Reason"])
+        if args.strict:
+            sys.exit("Stopping (--strict)")
+        print("Skipping them (use --strict to stop instead).")
     for path in args.site:
         site_id, site_type = find_site(cc, path)
         ids = site_device_ids(cc, site_id, path, args.recursive)
@@ -844,6 +886,9 @@ def main():
     else:
         print(f"\n{len(ordered)} target device(s):")
     print_table(rows, columns, highlight=lambda h, v: h == "Role" and v.upper() == "UNKNOWN")
+    if not_found:
+        # Repeated here, as the list above can scroll it out of view
+        print(f"\nNot in CC's inventory, skipped: {len(not_found)} device(s), listed above.")
 
     if args.save_only:
         word = "saved"
