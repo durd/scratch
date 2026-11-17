@@ -4,8 +4,9 @@ r"""Push a single Day-N CLI template to devices via Catalyst Center.
 Only the template's config is pushed (no full device provision).
 Targets: individual devices (--device, --device-file) and/or all devices on sites (--site).
 Devices that aren't found in CC's inventory are listed and skipped (--strict stops instead).
-Stops if a device gets no value for a required template variable, and warns about
-optional ones and params the template doesn't have (--skip-param-check skips this).
+Stops if a device gets no value for a required template variable, or a value its pick
+list or IP address type doesn't allow, and warns about missing optional ones and
+params the template doesn't have (--skip-param-check skips this).
 
 Credentials: env vars CC_USER / CC_PASS, otherwise you are prompted.
 
@@ -419,10 +420,46 @@ def base_name(name):
     return re.split(r"[.\[]", name, maxsplit=1)[0]
 
 
-def check_params(variables, targets, devices, per_device, debug=False):
-    """Check each device gets a value for every template variable CC doesn't fill itself.
+def device_list(names, total):
+    """'all 5', or '2 of 5: sw01, sw02' with at most 5 names."""
+    if len(names) == total:
+        return f"all {total}"
+    names = sorted(names)
+    more = f" +{len(names) - 5} more" if len(names) > 5 else ""
+    return f"{len(names)} of {total}: {', '.join(names[:5])}{more}"
 
-    Exits if a required variable without a default is missing on any device.
+
+def expected_value(v, value):
+    """What a template variable's value should be, or None if value is fine.
+
+    Checks pick lists and IPADDRESS variables, as CC's own form does. A list
+    value is checked item by item.
+    """
+    items = value if isinstance(value, list) else [value]
+    selection = v.get("selection") or {}
+    # Label -> value; on 3.2.3 both have been the same so far
+    choices = list((selection.get("selectionValues") or {}).values())
+    if choices:
+        one_of = f"one of {', '.join(map(str, choices))}"
+        if selection.get("selectionType") == "SINGLE_SELECT" and isinstance(value, list):
+            return f"a single value, {one_of}"
+        # As text, so --param x=10 (read as a number) matches a choice "10"
+        if any(show_value(i) not in map(show_value, choices) for i in items):
+            return one_of
+    elif v.get("dataType") == "IPADDRESS":
+        for i in items:
+            try:
+                ipaddress.ip_address(i if isinstance(i, str) else "")
+            except ValueError:
+                return "an IP address"
+    return None
+
+
+def check_params(variables, targets, devices, per_device, debug=False):
+    """Check each device gets a valid value for every template variable CC doesn't fill itself.
+
+    Exits if a required variable without a default is missing on any device, or
+    if a value isn't one of a pick list's choices or isn't a valid IP address.
     Warns about other missing variables, params that aren't template variables,
     and --params-file entries that match no target device.
     """
@@ -449,6 +486,7 @@ def check_params(variables, targets, devices, per_device, debug=False):
         print(f"  Warning: not variables in this template (typo?): {', '.join(unknown)}")
 
     rows, stop, by_cc = [], False, []
+    bad = {}  # (variable, value as shown, expected) -> hostnames
     for v in variables:
         name = v.get("parameterName")
         if not name:
@@ -459,6 +497,15 @@ def check_params(variables, targets, devices, per_device, debug=False):
         if v.get("notParam") or v.get("binding") or name.startswith("__"):
             by_cc.append(name)
             continue
+        for t in targets:
+            # Not for 'intf.name' style variables, whose value is a whole object
+            if name in t["params"] and base_name(name) == name:
+                value = t["params"][name]
+                expected = expected_value(v, value)
+                if expected:
+                    shown = "(hidden)" if v.get("sensitiveField") else show_value(value)
+                    bad.setdefault((name, shown, expected), []).append(
+                        devices[t["id"]].get("hostname") or t["id"])
         missing = [devices[t["id"]].get("hostname") or t["id"] for t in targets
                    if base_name(name) not in {base_name(k) for k in t["params"]}]
         if not missing:
@@ -469,30 +516,36 @@ def check_params(variables, targets, devices, per_device, debug=False):
         required = v.get("required")
         fatal = required is True and not has_default
         stop = stop or fatal
-        if len(missing) == len(targets):
-            where = f"all {len(targets)}"
-        else:
-            missing.sort()
-            more = f" +{len(missing) - 5} more" if len(missing) > 5 else ""
-            where = f"{len(missing)} of {len(targets)}: {', '.join(missing[:5])}{more}"
         shown = ("(hidden)" if v.get("sensitiveField") else show_value(default)
                  ) if has_default else "-"
-        rows.append([name, {True: "yes", False: "no"}.get(required, "?"), shown, where, fatal])
+        rows.append([name, {True: "yes", False: "no"}.get(required, "?"), shown,
+                     device_list(missing, len(targets)), fatal])
     if by_cc:
         # Shown so a wrong guess about CC's fields is visible on the first run
         print(f"  Not checked, set by CC or the template: {', '.join(sorted(by_cc))}")
-    if not rows:
-        print("  Every device gets a value for each template variable" if variables
+    if not rows and not bad:
+        print("  Every device gets a valid value for each template variable" if variables
               else "  The template has no variables")
         return
-    rows.sort(key=lambda r: (not r[4], r[0]))
-    print("\nTemplate variables without a value:")
-    print_table([r[:4] + ["STOP" if r[4] else "warning"] for r in rows],
-                ["Variable", "Required", "Default", "Missing on", "Result"],
-                highlight=lambda h, v: h == "Result" and v == "STOP")
-    if stop:
-        sys.exit("Required template variables have no value; give them with --param or "
-                 f"--params-file, or {how}")
+    if rows:
+        rows.sort(key=lambda r: (not r[4], r[0]))
+        print("\nTemplate variables without a value:")
+        print_table([r[:4] + ["STOP" if r[4] else "warning"] for r in rows],
+                    ["Variable", "Required", "Default", "Missing on", "Result"],
+                    highlight=lambda h, v: h == "Result" and v == "STOP")
+    if bad:
+        # CC's form only offers valid values; the API takes any value as is (3.2.3's
+        # preview rendered "yes" for a YES/NO list), which can quietly change what
+        # the template renders, e.g. #if ($X == "YES")
+        print("\nTemplate variables with a value the template doesn't allow:")
+        print_table([[name, value, expected, device_list(hosts, len(targets))]
+                     for (name, value, expected), hosts in sorted(bad.items())],
+                    ["Variable", "Value", "Expected", "Devices"])
+    why = (["required template variables have no value"] if stop else []) + (
+        ["template variables have values the template doesn't allow"] if bad else [])
+    if why:
+        sys.exit(f"Stopping: {' and '.join(why)}; fix them in --param or --params-file, "
+                 f"or {how}")
     print("  Warning: CC deploys these with their default, or without a value. Check the "
           "rendered config in CC if unsure.")
 
