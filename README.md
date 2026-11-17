@@ -45,6 +45,7 @@ Features:
 - Staged rollouts with `--batches`, asking before each next batch
 - Stops if the template isn't in a network profile assigned to the targets' sites (directly or through a composite)
 - Stops if a device gets no value for a required template variable, and warns about missing optional ones and unknown parameter names
+- `--preview` renders the template through CC for one target and writes the config to a file to review before deploying
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
 - Prints when it started, and on any exit when it finished and how long it took
@@ -259,6 +260,34 @@ generate-params | ./cc_deploy_template.py \
 
 The dry run shows the parameters each device ends up with, so check it before
 deploying.
+
+#### Preview
+
+`--preview` has CC render the template for one target device, with the same
+params and `resourceParams` the deploy sends, and writes the config to
+`preview-<hostname>-v<version>.txt` in the current directory. It renders the
+first target by hostname, or the one you name (`--preview sw01`). It runs after
+the variable check and before the deploy prompt, so it works with `--dry-run`:
+
+```bash
+./cc_deploy_template.py \
+  --host cc.example.com \
+  --template "Access-Baseline" \
+  --device sw01 \
+  --params-file params.json \
+  --preview --dry-run
+less preview-sw01.example.com-v12.txt
+```
+
+- If CC reports errors (`validationErrors`) or returns no config, the run stops,
+  even without `--dry-run`. Run without `--preview` to deploy anyway.
+- The output says which version was rendered. It asks for the version being
+  deployed; if CC doesn't accept that, it renders by template ID, which may be
+  the working copy instead, and the output says so.
+- A block skipped by an `{% if %}` just isn't in the file, so check the parts
+  that depend on pick-list values.
+- The file is readable only by you, as it has any sensitive values in clear
+  text. `--debug` prints the preview request.
 
 #### Template variable check
 
