@@ -534,8 +534,9 @@ def check_params(variables, targets, devices, per_device, debug=False):
                     ["Variable", "Required", "Default", "Missing on", "Result"],
                     highlight=lambda h, v: h == "Result" and v == "STOP")
     if bad:
-        # CC's form only offers valid values; a wrong one sent through the API
-        # can quietly change what the template renders, e.g. #if ($X == "JA")
+        # CC's form only offers valid values; the API takes any value as is (3.2.3's
+        # preview rendered "yes" for a YES/NO list), which can quietly change what
+        # the template renders, e.g. #if ($X == "YES")
         print("\nTemplate variables with a value the template doesn't allow:")
         print_table([[name, value, expected, device_list(hosts, len(targets))]
                      for (name, value, expected), hosts in sorted(bad.items())],
