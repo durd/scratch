@@ -290,6 +290,12 @@ them. If CC doesn't return the variables, the script says so and doesn't check.
 `--skip-param-check` turns the check off, e.g. when CC marks a template-local
 variable (`#set`) as required.
 
+Templates that use `$__device` or `$__interface` get `resourceParams` with each
+target in the deploy request, so CC can fill those in from the device. Without
+them CC 3.2.3 fails the deploy (`NCTP10092: Implicit variable(s) ... require
+resourceParams`). `--debug` shows them in the deploy request. If CC doesn't
+return the template's variables, they aren't sent.
+
 Required environment variables:
 
 ```bash

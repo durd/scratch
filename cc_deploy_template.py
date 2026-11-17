@@ -415,6 +415,18 @@ def template_variables(cc, template_id, version_id):
     return found if found is not None else read(template_id, latestVersion="true")
 
 
+def resource_params(variables, device_id):
+    """resourceParams for a deploy target, or None if the template doesn't need them.
+
+    CC fills implicit variables like __device and __interface from the device
+    only with these; without them 3.2.3 fails the deploy (NCTP10092). Only sent
+    when the template has such variables, so other deploys stay as tested.
+    """
+    if not any((v.get("parameterName") or "").startswith("__") for v in variables or []):
+        return None
+    return [{"type": "MANAGED_DEVICE_UUID", "scope": "RUNTIME", "value": device_id}]
+
+
 def base_name(name):
     """'intf' for 'intf.name' or 'intf[0]', as one value fills all of them."""
     return re.split(r"[.\[]", name, maxsplit=1)[0]
@@ -1057,23 +1069,27 @@ def main():
             save_config(cc, ids, devices, args.timeout)
             return ids
     else:
+        variables = template_variables(cc, template_id, version_id)
         targets = []
         for d in devices.values():
             own = (per_device.get(d.get("hostname"))
                    or per_device.get(d.get("managementIpAddress")) or {})
-            targets.append({
+            target = {
                 "type": "MANAGED_DEVICE_UUID",
                 "id": d["id"],
                 "versionedTemplateId": version_id,
                 "params": {**common, **own},
-            })
+            }
+            resource = resource_params(variables, d["id"])
+            if resource:
+                target["resourceParams"] = resource
+            targets.append(target)
 
         print_params(targets, devices)
         if args.skip_param_check:
             print("\nSkipping the template variable check (--skip-param-check).")
         else:
-            check_params(template_variables(cc, template_id, version_id), targets, devices,
-                         per_device, args.debug)
+            check_params(variables, targets, devices, per_device, args.debug)
 
         by_id = {t["id"]: t for t in targets}
         if args.debug:
