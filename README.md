@@ -44,6 +44,7 @@ Features:
 - Shows the targets and the template parameters each device gets before deploying
 - Staged rollouts with `--batches`, asking before each next batch
 - Stops if the template isn't in a network profile assigned to the targets' sites (directly or through a composite)
+- Stops if a device gets no value for a required template variable, and warns about missing optional ones and unknown parameter names
 - Supports dry-run and confirmation prompts; `--debug` also prints the JSON sent to CC and CC's raw task output
 - Waits for task and deployment status completion
 - Prints when it started, and on any exit when it finished and how long it took
@@ -258,6 +259,30 @@ generate-params | ./cc_deploy_template.py \
 
 The dry run shows the parameters each device ends up with, so check it before
 deploying.
+
+#### Template variable check
+
+After the parameter table, the script reads the variables of the template version
+being deployed from CC and checks that every device gets a value for each one:
+
+- A **required** variable without a default value, missing on any device, stops
+  the run. The table shows which devices miss it.
+- An optional variable, or one with a default, that's missing gives a warning.
+  CC deploys it with the default, or without a value. Check the rendered config
+  in CC if unsure.
+- Variables CC fills in itself aren't checked: ones bound to a source (inventory,
+  network profile, ...), system variables like `__device`, and ones marked
+  "not a variable" (e.g. `#set` locals). They're listed as `Not checked, set by CC
+  or the template`, so check that line on the first dry run of a template.
+- `--param` or `--params-file` names that aren't variables in the template are
+  reported, as they're usually typos.
+- `--params-file` keys that match no target device are noted. Keys must be the
+  full hostname or the management IP; a short hostname doesn't match.
+
+`--dry-run` runs the check too. `--debug` prints the variables as CC returned
+them. If CC doesn't return the variables, the script says so and doesn't check.
+`--skip-param-check` turns the check off, e.g. when CC marks a template-local
+variable (`#set`) as required.
 
 Required environment variables:
 
