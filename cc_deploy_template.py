@@ -4,6 +4,8 @@ r"""Push a single Day-N CLI template to devices via Catalyst Center.
 Only the template's config is pushed (no full device provision).
 Targets: individual devices (--device, --device-file) and/or all devices on sites (--site).
 Devices that aren't found in CC's inventory are listed and skipped (--strict stops instead).
+Stops if a device gets no value for a required template variable, and warns about
+optional ones and params the template doesn't have (--skip-param-check skips this).
 
 Credentials: env vars CC_USER / CC_PASS, otherwise you are prompted.
 
@@ -395,6 +397,106 @@ def print_params(targets, devices):
     print_table(sorted(rows, key=lambda r: r[0] or ""), ["Hostname", *keys])
 
 
+def template_variables(cc, template_id, version_id):
+    """The committed version's variables (templateParams), or None if CC doesn't give them.
+
+    The working copy can have other variables than the version being deployed.
+    Any error reading them only skips the check, so it can't block a deploy.
+    """
+    def read(tid, **params):
+        t = cc.get(f"{TEMPLATE_PATH}/{tid}", none_on=range(400, 600), **params)
+        if isinstance(t, dict):
+            t = t.get("response", t)  # Some releases wrap the record, some don't
+        v = t.get("templateParams") if isinstance(t, dict) else None
+        return [p for p in v if isinstance(p, dict)] if isinstance(v, list) else None
+
+    found = read(version_id)
+    return found if found is not None else read(template_id, latestVersion="true")
+
+
+def base_name(name):
+    """'intf' for 'intf.name' or 'intf[0]', as one value fills all of them."""
+    return re.split(r"[.\[]", name, maxsplit=1)[0]
+
+
+def check_params(variables, targets, devices, per_device, debug=False):
+    """Check each device gets a value for every template variable CC doesn't fill itself.
+
+    Exits if a required variable without a default is missing on any device.
+    Warns about other missing variables, params that aren't template variables,
+    and --params-file entries that match no target device.
+    """
+    print("\nChecking the template's variables...")
+    how = "skip the check with --skip-param-check"
+    if debug:
+        shown = [{**v, "defaultValue": "(hidden)"} if v.get("sensitiveField") else v
+                 for v in variables or []]
+        print(f"\n  templateParams:\n{json.dumps(shown, indent=2)}")
+    if variables is None:
+        print("  Couldn't read the template's variables from CC, not checked.")
+        return
+
+    names = {d.get(k) for d in devices.values() for k in ("hostname", "managementIpAddress")}
+    unmatched = sorted(k for k in per_device if k not in names)
+    if unmatched:
+        print("  Note: --params-file entries that match no target device (keys must be the "
+              f"full hostname or management IP): {', '.join(unmatched)}")
+
+    known = {base_name(v.get("parameterName") or "") for v in variables}
+    given = {base_name(k) for t in targets for k in t["params"]}
+    unknown = sorted(given - known)
+    if unknown:
+        print(f"  Warning: not variables in this template (typo?): {', '.join(unknown)}")
+
+    rows, stop, by_cc = [], False, []
+    for v in variables:
+        name = v.get("parameterName")
+        if not name:
+            continue
+        # Variables marked "not a variable", bound to a CC source (inventory,
+        # profile, ...) or system ones like __device are filled in by CC. 3.2.3
+        # gives unbound ones binding "", and __device as required.
+        if v.get("notParam") or v.get("binding") or name.startswith("__"):
+            by_cc.append(name)
+            continue
+        missing = [devices[t["id"]].get("hostname") or t["id"] for t in targets
+                   if base_name(name) not in {base_name(k) for k in t["params"]}]
+        if not missing:
+            continue
+        default = v.get("defaultValue")
+        has_default = default not in (None, "")
+        # Some releases leave out "required"; without it, only warn
+        required = v.get("required")
+        fatal = required is True and not has_default
+        stop = stop or fatal
+        if len(missing) == len(targets):
+            where = f"all {len(targets)}"
+        else:
+            missing.sort()
+            more = f" +{len(missing) - 5} more" if len(missing) > 5 else ""
+            where = f"{len(missing)} of {len(targets)}: {', '.join(missing[:5])}{more}"
+        shown = ("(hidden)" if v.get("sensitiveField") else show_value(default)
+                 ) if has_default else "-"
+        rows.append([name, {True: "yes", False: "no"}.get(required, "?"), shown, where, fatal])
+    if by_cc:
+        # Shown so a wrong guess about CC's fields is visible on the first run
+        print(f"  Not checked, set by CC or the template: {', '.join(sorted(by_cc))}")
+    if not rows:
+        print("  Every device gets a value for each template variable" if variables
+              else "  The template has no variables")
+        return
+    rows.sort(key=lambda r: (not r[4], r[0]))
+    print("\nTemplate variables without a value:")
+    print_table([r[:4] + ["STOP" if r[4] else "warning"] for r in rows],
+                ["Variable", "Required", "Default", "Missing on", "Result"],
+                highlight=lambda h, v: h == "Result" and v == "STOP")
+    if stop:
+        sys.exit("Required template variables have no value; give them with --param or "
+                 f"--params-file, or {how}")
+    print("  Warning: CC deploys these with their default, or without a value. Check the "
+          "rendered config in CC if unsure.")
+
+
 def load_params_file(path):
     """Per-device params from a JSON file, or from stdin when path is '-'."""
     try:
@@ -707,6 +809,9 @@ def main():
     p.add_argument("--skip-profile-check", action="store_true",
                    help="Deploy even to devices on sites the template's network profiles "
                         "(directly or via a composite) aren't assigned to")
+    p.add_argument("--skip-param-check", action="store_true",
+                   help="Deploy even if a required template variable gets no value from "
+                        "--param or --params-file")
     p.add_argument("--only-covered", action="store_true",
                    help="Skip devices on sites the template's network profiles aren't "
                         "assigned to, instead of stopping")
@@ -911,6 +1016,11 @@ def main():
             })
 
         print_params(targets, devices)
+        if args.skip_param_check:
+            print("\nSkipping the template variable check (--skip-param-check).")
+        else:
+            check_params(template_variables(cc, template_id, version_id), targets, devices,
+                         per_device, args.debug)
 
         by_id = {t["id"]: t for t in targets}
         if args.debug:
