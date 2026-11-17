@@ -267,6 +267,12 @@ being deployed from CC and checks that every device gets a value for each one:
 
 - A **required** variable without a default value, missing on any device, stops
   the run. The table shows which devices miss it.
+- A value the template doesn't allow stops the run: a pick-list variable whose
+  value isn't one of its choices (`ja` for a `JA`/`NEJ` list), a list for a
+  single-choice variable, or an `IPADDRESS` variable that isn't a valid IPv4 or
+  IPv6 address (no `/24`). CC's form only offers valid values, but a wrong one
+  sent here can quietly change what the template renders. A list value is
+  checked item by item.
 - An optional variable, or one with a default, that's missing gives a warning.
   CC deploys it with the default, or without a value. Check the rendered config
   in CC if unsure.
