@@ -42,6 +42,10 @@ Examples:
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run
 
+  # Render the config CC would push to sw01 into preview-sw01...-v<version>.txt
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --site "Global/Area/Building" --preview sw01 --dry-run
+
   # Same, and also print the JSON request that would be sent to CC
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --dry-run --debug
@@ -106,6 +110,15 @@ class CatalystCenter:
         r = self.s.post(self.base + path, json=body, timeout=60)
         if not r.ok:
             sys.exit(f"POST {path} failed: {r.status_code} {r.text}")
+        return r.json()
+
+    def put(self, path, body, none_on=()):
+        """PUT path. A status in none_on returns None instead of exiting."""
+        r = self.s.put(self.base + path, json=body, timeout=60)
+        if r.status_code in none_on:
+            return None
+        if not r.ok:
+            sys.exit(f"PUT {path} failed: {r.status_code} {r.text}")
         return r.json()
 
 
@@ -425,6 +438,56 @@ def resource_params(variables, device_id):
     if not any((v.get("parameterName") or "").startswith("__") for v in variables or []):
         return None
     return [{"type": "MANAGED_DEVICE_UUID", "scope": "RUNTIME", "value": device_id}]
+
+
+def preview_config(cc, template_id, version_id, version, target, device, sensitive,
+                   debug=False):
+    """Render the template through CC for one deploy target and write it to a file.
+
+    Exits if CC can't render it, so a run that asked for a preview doesn't deploy
+    unreviewed (e.g. with --yes).
+    """
+    name = device.get("hostname") or device["id"]
+    print(f"\nRendering the template through CC for {name} (only this device)...")
+    body = {k: target[k] for k in ("params", "resourceParams") if k in target}
+    body["deviceId"] = target["id"]
+    # The version ID renders exactly the version deployed. The template ID is the
+    # one seen working on 3.2.3, but may render the working copy instead.
+    for tid, what in ((version_id, f"v{version}"),
+                      (template_id, f"the template ID, which may be the working copy "
+                                    f"rather than v{version}")):
+        request = {"templateId": tid, **body}
+        if debug:
+            print(f"\n  Preview request:\n{json.dumps(request, indent=2)}")
+        result = cc.put(f"{TEMPLATE_PATH}/preview", request, none_on=range(400, 600))
+        if isinstance(result, dict):
+            break
+    else:
+        sys.exit("Stopping: CC couldn't render the template for a preview; "
+                 "run without --preview to deploy without one")
+    if isinstance(result.get("response"), dict):
+        result = result["response"]  # 3.2.3 doesn't wrap it, other releases may
+
+    errors = result.get("validationErrors") or []
+    for e in errors:
+        msg = e.get("message") if isinstance(e, dict) else e
+        print(f"  {red('Error')}: {msg}")
+    config = result.get("cliPreview")
+    if errors or not config:
+        sys.exit("Stopping: CC didn't render the template"
+                 + (" (validationErrors above)" if errors else "")
+                 + "; fix it, or run without --preview to deploy without one")
+
+    config = config.replace("\r\n", "\n").replace("\r", "\n")
+    path = f"preview-{re.sub(r'[^\w.-]', '_', name)}-v{version}.txt"
+    # Owner-only: the rendered config has sensitive variables in clear text
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # O_CREAT's mode doesn't apply to an existing file
+    with os.fdopen(fd, "w") as f:
+        f.write(config if config.endswith("\n") else config + "\n")
+    print(f"  Rendered from {what}: {len(config.splitlines())} line(s) in {path}")
+    if sensitive:
+        print("  The file has the template's sensitive values in clear text.")
 
 
 def base_name(name):
@@ -878,6 +941,10 @@ def main():
     p.add_argument("--skip-param-check", action="store_true",
                    help="Deploy even if a required template variable gets no value from "
                         "--param or --params-file")
+    p.add_argument("--preview", nargs="?", const="", metavar="DEVICE",
+                   help="Render the template through CC for one target (the first, or "
+                        "DEVICE) and write it to preview-<hostname>-v<version>.txt; stops "
+                        "if CC can't render it")
     p.add_argument("--only-covered", action="store_true",
                    help="Skip devices on sites the template's network profiles aren't "
                         "assigned to, instead of stopping")
@@ -912,6 +979,8 @@ def main():
         p.error("--save-only and --no-save don't go together")
     if args.only_covered and args.skip_profile_check:
         p.error("--only-covered and --skip-profile-check don't go together")
+    if args.save_only and args.preview is not None:
+        p.error("--save-only and --preview don't go together")
 
     started = time.time()
     print(f"Started {stamp(started)}")
@@ -1093,6 +1162,14 @@ def main():
             check_params(variables, targets, devices, per_device, args.debug)
 
         by_id = {t["id"]: t for t in targets}
+        if args.preview is not None:
+            shown = [d for d in ordered if matches_name(d, args.preview)] if args.preview \
+                else ordered
+            if not shown:
+                sys.exit(f"--preview {args.preview}: not one of the target devices")
+            preview_config(cc, template_id, version_id, version, by_id[shown[0]["id"]],
+                           shown[0], any(v.get("sensitiveField") for v in variables or []),
+                           args.debug)
         if args.debug:
             print("\nDeploy request:")
             print(json.dumps(deploy_body(template_id, args.force, targets), indent=2))
