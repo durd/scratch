@@ -271,14 +271,15 @@ being deployed from CC and checks that every device gets a value for each one:
   value isn't one of its choices (`ja` for a `JA`/`NEJ` list), a list for a
   single-choice variable, or an `IPADDRESS` variable that isn't a valid IPv4 or
   IPv6 address (no `/24`). CC's form only offers valid values, but a wrong one
-  sent here can quietly change what the template renders. A list value is
-  checked item by item.
+  sent here reaches the template as is. With `{% if X == "JA" %}` it takes the
+  wrong branch; with `{% if X == "NEJ" %}...{% else %}` any typo lands in the
+  else branch. A list value is checked item by item.
 - An optional variable, or one with a default, that's missing gives a warning.
   CC deploys it with the default, or without a value. Check the rendered config
   in CC if unsure.
 - Variables CC fills in itself aren't checked: ones bound to a source (inventory,
   network profile, ...), system variables like `__device`, and ones marked
-  "not a variable" (e.g. `#set` locals). They're listed as `Not checked, set by CC
+  "not a variable" (e.g. `{% set %}` locals). They're listed as `Not checked, set by CC
   or the template`, so check that line on the first dry run of a template.
 - `--param` or `--params-file` names that aren't variables in the template are
   reported, as they're usually typos.
@@ -288,9 +289,9 @@ being deployed from CC and checks that every device gets a value for each one:
 `--dry-run` runs the check too. `--debug` prints the variables as CC returned
 them. If CC doesn't return the variables, the script says so and doesn't check.
 `--skip-param-check` turns the check off, e.g. when CC marks a template-local
-variable (`#set`) as required.
+variable (`{% set %}`) as required.
 
-Templates that use `$__device` or `$__interface` get `resourceParams` with each
+Templates that use `__device` or `__interface` get `resourceParams` with each
 target in the deploy request, so CC can fill those in from the device. Without
 them CC 3.2.3 fails the deploy (`NCTP10092: Implicit variable(s) ... require
 resourceParams`). `--debug` shows them in the deploy request. If CC doesn't
