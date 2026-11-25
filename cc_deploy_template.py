@@ -4,6 +4,8 @@ r"""Push a single Day-N CLI template to devices via Catalyst Center.
 Only the template's config is pushed (no full device provision).
 Targets: individual devices (--device, --device-file) and/or all devices on sites (--site).
 Devices that aren't found in CC's inventory are listed and skipped (--strict stops instead).
+So are devices whose series isn't one of the template's device types, which CC would
+reject (--skip-type-check sends them anyway).
 Stops if a device gets no value for a required template variable, or a value its pick
 list or IP address type doesn't allow, and warns about missing optional ones and
 params the template doesn't have (--skip-param-check skips this).
@@ -415,6 +417,67 @@ def print_params(targets, devices):
     print_table(sorted(rows, key=lambda r: r[0] or ""), ["Hostname", *keys])
 
 
+def read_template(cc, tid, **params):
+    """A template or template version record, or {} if CC doesn't give it."""
+    t = cc.get(f"{TEMPLATE_PATH}/{tid}", none_on=range(400, 600), **params)
+    if isinstance(t, dict):
+        t = t.get("response", t)  # Some releases wrap the record, some don't
+    return t if isinstance(t, dict) else {}
+
+
+def check_device_types(cc, template_id, version_id, devices, debug=False):
+    """Return the IDs of devices whose family and series the template isn't for.
+
+    CC rejects those as "not applicable ... mismatch of deviceType" (3.2.3),
+    and leaves them out of the deployment's result.
+    """
+    print("\nChecking the template's device types...")
+    t = read_template(cc, version_id)
+    if not t.get("deviceTypes"):
+        t = read_template(cc, template_id, latestVersion="true")
+    types = [x for x in t.get("deviceTypes") or [] if isinstance(x, dict)]
+    if debug:
+        print(f"\n  deviceTypes: {json.dumps(types, indent=2)}\n"
+              f"  softwareType: {t.get('softwareType')}")
+    if not types:
+        print("  The template lists no device types, not checked." if t else
+              "  Couldn't read the template from CC, not checked.")
+        return set()
+
+    def norm(v):
+        return (v or "").strip().lower()
+
+    # productType (the model) isn't compared: the templates seen on 3.2.3 don't
+    # set it, and inventory names stacks differently ("... Switch Stack")
+    def fits(d):
+        return any(norm(x.get("productFamily")) == norm(d.get("family"))
+                   and (not x.get("productSeries")
+                        or norm(x.get("productSeries")) == norm(d.get("series")))
+                   for x in types)
+
+    print("  Template is for: " + ", ".join(x.get("productSeries") or x.get("productFamily")
+                                           or "?" for x in types))
+    other = sorted((d for d in devices.values() if not fits(d)),
+                   key=lambda d: d.get("hostname") or "")
+    # Only noted: how CC compares software types isn't known, and it reports
+    # the devices it rejects anyway
+    sw = norm(t.get("softwareType"))
+    odd = [d for d in devices.values() if fits(d) and sw and d.get("softwareType")
+           and norm(d.get("softwareType")) != sw]
+    if odd:
+        print(f"  Note: the template is for {t.get('softwareType')}, CC may reject these: "
+              + ", ".join(f"{d.get('hostname')} ({d.get('softwareType')})" for d in odd))
+    if not other:
+        print(f"  All {len(devices)} device(s) are of these types")
+        return set()
+    print(f"\nSkipping {len(other)} device(s) of other types, CC would reject them "
+          "(--skip-type-check sends them anyway):")
+    print_table([[d.get("hostname"), d.get("managementIpAddress"), d.get("platformId"),
+                  d.get("series")] for d in other],
+                ["Hostname", "Management IP", "Platform", "Series"])
+    return {d["id"] for d in other}
+
+
 def template_variables(cc, template_id, version_id):
     """The committed version's variables (templateParams), or None if CC doesn't give them.
 
@@ -422,10 +485,7 @@ def template_variables(cc, template_id, version_id):
     Any error reading them only skips the check, so it can't block a deploy.
     """
     def read(tid, **params):
-        t = cc.get(f"{TEMPLATE_PATH}/{tid}", none_on=range(400, 600), **params)
-        if isinstance(t, dict):
-            t = t.get("response", t)  # Some releases wrap the record, some don't
-        v = t.get("templateParams") if isinstance(t, dict) else None
+        v = read_template(cc, tid, **params).get("templateParams")
         return [p for p in v if isinstance(p, dict)] if isinstance(v, list) else None
 
     found = read(version_id)
@@ -951,6 +1011,9 @@ def main():
     p.add_argument("--skip-profile-check", action="store_true",
                    help="Deploy even to devices on sites the template's network profiles "
                         "(directly or via a composite) aren't assigned to")
+    p.add_argument("--skip-type-check", action="store_true",
+                   help="Deploy even to devices whose family or series isn't one of the "
+                        "template's device types (CC rejects them)")
     p.add_argument("--skip-param-check", action="store_true",
                    help="Deploy even if a required template variable gets no value from "
                         "--param or --params-file")
@@ -1120,8 +1183,20 @@ def main():
     if not devices:
         sys.exit("No devices to deploy to")
 
+    # Before the profile check, which looks up each device's site
+    other = set()
     if args.save_only:
         pass  # Nothing is deployed, so there's no template to check
+    elif args.skip_type_check:
+        print("\nSkipping the device type check (--skip-type-check).")
+    else:
+        other = check_device_types(cc, template_id, version_id, devices, args.debug)
+        devices = {k: d for k, d in devices.items() if k not in other}
+        if not devices:
+            sys.exit("No devices to deploy to")
+
+    if args.save_only:
+        pass
     elif args.skip_profile_check:
         print("\nSkipping the network profile check (--skip-profile-check).")
     else:
@@ -1153,6 +1228,9 @@ def main():
     if not_found:
         # Repeated here, as the list above can scroll it out of view
         print(f"\nNot in CC's inventory, skipped: {len(not_found)} device(s), listed above.")
+    if other:
+        print(f"\nNot of the template's device types, skipped: {len(other)} device(s), "
+              "listed above.")
 
     if args.save_only:
         word = "saved"

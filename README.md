@@ -44,6 +44,7 @@ Features:
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
 - Staged rollouts with `--batches`, asking before each next batch
+- Skips devices whose series isn't one of the template's device types, which CC would reject
 - Stops if the template isn't in a network profile assigned to the targets' sites (directly or through a composite)
 - Stops if a device gets no value for a required template variable, and warns about missing optional ones and unknown parameter names
 - `--preview` renders the template through CC for one target and writes the config to a file to review before deploying
@@ -55,8 +56,27 @@ Features:
 
 Template notes:
 - This script is intended for a template that is already committed in Catalyst Center.
-- The template does not need any device series/models attached to it.
+- The template does not need any device series/models attached to it. If it has
+  some, CC only deploys to those: see [Device type check](#device-type-check).
 - It does need a network profile: see [Network profile check](#network-profile-check).
+
+#### Device type check
+
+A template's device types list the families and series it's for, e.g. Cisco
+Catalyst 9300 Series Switches. CC rejects other devices as "not applicable ...
+mismatch of deviceType or softwareType or softwareVersion" (3.2.3), and leaves
+them out of the deployment's result. So before showing the targets, the script
+compares each device's family and series in inventory with the device types of
+the version being deployed, and skips and lists the devices that don't match.
+`--dry-run` runs the check too.
+
+- Models (`productType`) aren't compared, as inventory names stacks differently.
+- The template's software type (e.g. IOS-XE) is only noted for devices that run
+  another one, as it isn't known how CC compares them.
+- A template with no device types isn't checked.
+
+`--skip-type-check` turns the check off and sends every device to CC, which
+rejects the ones that don't match.
 
 #### Network profile check
 
