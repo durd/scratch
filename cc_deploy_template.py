@@ -741,6 +741,16 @@ def parse_kv(items):
     return out
 
 
+def non_applicable(progress):
+    """{device ID: reason} from CC's 'nonApplicableTargets: {<uuid>=<reason>, ...}'."""
+    skipped = {}
+    m = re.search(r"nonApplicableTargets:\s*\{(.*?)\}", progress)
+    if m:
+        for key, reason in re.findall(r"([^,=\s][^,=]*)=(.*?)(?=,\s*[^,=\s][^,=]*=|$)", m.group(1)):
+            skipped[key.strip()] = reason.strip()
+    return skipped
+
+
 def report_progress(progress, devices, target_ids):
     """Print CC's applicable / non-applicable targets as readable lists.
 
@@ -754,11 +764,7 @@ def report_progress(progress, devices, target_ids):
         d = devices.get(uuid)
         return f"{d.get('hostname')} ({d.get('managementIpAddress')})" if d else uuid
 
-    skipped = {}
-    m = re.search(r"nonApplicableTargets:\s*\{(.*?)\}", progress)
-    if m:
-        for key, reason in re.findall(r"([^,=\s][^,=]*)=(.*?)(?=,\s*[^,=\s][^,=]*=|$)", m.group(1)):
-            skipped[key.strip()] = reason.strip()
+    skipped = non_applicable(progress)
 
     # An open [ at the end: CC cut the text off inside the list
     m = re.search(r"(?<![a-z])ApplicableTargets:\s*(\[[^\]]*\]|\{[^}]*\}|None|\[[^\]]*$)",
@@ -823,7 +829,7 @@ def report_progress(progress, devices, target_ids):
             current = rest
         return [], current
     else:
-        print("\nResult: deploy started for the devices above. Check Deployment History in CC.")
+        print("\nResult: deploy started for the devices above. Check the Audit Log in CC.")
         return [u for u in applicable if u not in skipped], current
 
 
@@ -1191,9 +1197,10 @@ def main():
             sys.exit("Aborted")
 
     ask_between = not args.yes
-    skipped, skip = [], False
+    skipped, missed, skip = [], [], False
     for n, batch in enumerate(batches, 1):
         names = ", ".join(d.get("hostname") or d["id"] for d in batch)
+        failed = []
         if skip:
             print(f"\n=== Batch {n} of {len(batches)}: skipped ({names})")
             skipped += batch
@@ -1201,14 +1208,20 @@ def main():
             if len(batches) > 1:
                 print(f"\n=== Batch {n} of {len(batches)}: {names}")
             done = run(batch)
+            failed = [d for d in batch if d["id"] not in done]
+        if failed:
+            missed += failed
+            what = f"Batch {n} {word}" if len(batches) > 1 else word.capitalize()
+            print(f"\n{what} on {len(batch) - len(failed)} of {len(batch)} device(s). "
+                  f"Not {word}:")
+            print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in failed],
+                        ["Hostname", "Management IP"])
         rest = [d for b in batches[n:] for d in b]
         if not rest:
             break
-        if not skip and len(done) < len(batch):
-            print(f"\nBatch {n} {word} on {len(done)} of {len(batch)} device(s).")
-            if not ask_between:
-                stop(skipped + rest,
-                     f"Stopping after batch {n}, as not every device in it was {word}", word)
+        if failed and not ask_between:
+            stop(missed + skipped + rest,
+                 f"Stopping after batch {n}, as not every device in it was {word}", word)
         skip = False
         if ask_between:
             answer = ask(f"\nContinue with batch {n + 1} ({len(batches[n])} device(s))? "
@@ -1220,7 +1233,11 @@ def main():
             elif answer == "s":
                 skip = True
             elif answer != "y":
-                stop(skipped + rest, "Stopped", word)
+                stop(missed + skipped + rest, "Stopped", word)
+    if missed and len(batches) > 1:
+        print(f"\nNot {word} on {len(missed)} device(s), listed with their batch above:")
+        print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in missed],
+                    ["Hostname", "Management IP"])
     if skipped:
         print(f"\nSkipped, not {word} on {len(skipped)} device(s):")
         print_table([[d.get("hostname"), d.get("managementIpAddress")] for d in skipped],
@@ -1288,7 +1305,7 @@ def deploy(cc, args, template_id, version_id, version, targets, devices):
         if deployed and not confirmed:
             print(f"\nWarning: the save ran after a fixed {args.save_wait}s wait, not a "
                   "confirmed deploy. If a device was still applying the template, part "
-                  "of it may be unsaved. Check Deployment History in CC, and raise "
+                  "of it may be unsaved. Check the Audit Log in CC, and raise "
                   "--save-wait for slow devices.")
     return deployed + current
 
@@ -1332,6 +1349,15 @@ def deploy_request(cc, args, template_id, version_id, targets, devices):
                     already.append(uuid)
                 else:
                     deployed.append(uuid)
+            # 3.2.3 leaves out devices it didn't deploy to; the reason, if any,
+            # is only in the task text
+            listed = {dev.get("deviceId") for dev in status.get("devices", [])}
+            reasons = non_applicable(progress)
+            for t in targets:
+                if t["id"] not in listed:
+                    d = devices.get(t["id"], {})
+                    why = reasons.get(t["id"]) or "no reason given"
+                    print(f"  {d.get('hostname') or t['id']}: not in CC's deployment status ({why})")
             return deployed, already, True
     ids = [t["id"] for t in targets]
     if len(progress) >= PROGRESS_MAX - 3:

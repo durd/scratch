@@ -131,6 +131,8 @@ size repeats), in hostname order.
 - With `--yes`, or after `a`, it doesn't ask, but stops if a batch didn't reach all its
   devices. Devices CC skips as already on this template version count as reached;
   they aren't saved again.
+- The devices a batch didn't reach are listed after it, and first in the list of
+  devices not deployed when the run stops, so you can use that list to resume.
 - Each batch is saved before the next one starts.
 
 #### Saving without deploying
@@ -154,7 +156,10 @@ answer is cut off anyway, its devices are counted as deployed and saved.
 When CC deploys something, it also gives a deployment ID. The script then reads
 the result per device: deployed, already on this version, or failed. It saves
 the deployed ones as soon as CC says they're done, without the fixed
-`--save-wait` pause. Without a deployment ID it goes by the task text. In a
+`--save-wait` pause. CC 3.2.3 leaves devices it didn't deploy to out of that
+result, even when the deployment as a whole says SUCCESS. The script names those
+devices, with CC's reason from the task text if CC gave one, and doesn't count
+them as deployed. Without a deployment ID it goes by the task text. In a
 request with both new and already-deployed devices, that text doesn't say which
 were skipped, so all of them are saved. That's harmless, just an extra write
 memory.
