@@ -29,6 +29,10 @@ Examples:
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area" --recursive --family switch --role access
 
+  # Only the C9300 and C9500 switches in a file
+  cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
+      --device-file devices.txt --include-platform C9300 --include-platform C9500
+
   # A floor, but not its 2960S switches or two named devices
   cc_deploy_template.py --host cc.example.com --template "Fix-NTP" \
       --site "Global/Area/Building/Floor 1" --exclude-platform 2960S \
@@ -927,6 +931,9 @@ def main():
     p.add_argument("--exclude-contact", action="append", default=[],
                    help="Skip devices whose SNMP contact contains this text, or matches a "
                         "wildcard (repeatable)")
+    p.add_argument("--include-platform", action="append", default=[],
+                   help="Only devices whose model or series contains this text, e.g. C9300 "
+                        "(repeatable)")
     p.add_argument("--exclude-platform", action="append", default=[],
                    help="Skip devices whose model or series contains this text, e.g. 2960S "
                         "(repeatable)")
@@ -1049,6 +1056,17 @@ def main():
         wanted = [f.lower() for f in args.family]
         devices = {k: d for k, d in devices.items()
                    if any(w in (d.get("family") or "").lower() for w in wanted)}
+
+    if args.include_platform:
+        # Same text match as --exclude-platform
+        wanted = {t: t.lower() for t in args.include_platform}
+        model = {k: f"{d.get('platformId') or ''} {d.get('series') or ''}".lower()
+                 for k, d in devices.items()}
+        unused = [t for t, w in wanted.items() if not any(w in m for m in model.values())]
+        devices = {k: d for k, d in devices.items()
+                   if any(w in model[k] for w in wanted.values())}
+        if unused:
+            print(f"\nNote: --include-platform matched no device: {', '.join(unused)}")
 
     if args.role:
         # Exact match, so 'router' doesn't pick up 'BORDER ROUTER'
