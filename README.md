@@ -39,6 +39,7 @@ Features:
 - Target all devices under a site with `--site`
 - Optionally recurse below a site path with `--recursive`
 - Filter by device family with `--family`, device role (access, distribution, core, ...) with `--role`, and SNMP contact with `--contact`
+- Limit to models with `--include-platform` (e.g. `C9300`)
 - Exclude devices by model with `--exclude-platform` (e.g. `2960S`), SNMP contact with `--exclude-contact`, and name with `--exclude-device` or `--exclude-file`
 - Apply per-device parameter overrides from JSON
 - Shows the targets and the template parameters each device gets before deploying
@@ -108,7 +109,8 @@ Matching ignores case.
 | `--role access` | the exact role; `UNKNOWN` roles are left out |
 | `--contact noc` | text in the SNMP contact (keeps matches) |
 | `--exclude-contact TEXT` | text in the SNMP contact (skips matches) |
-| `--exclude-platform 2960S` | text in the model or series, e.g. `WS-C2960S-48FPS-L` |
+| `--include-platform C9300` | text in the model or series (keeps matches) |
+| `--exclude-platform 2960S` | text in the model or series, e.g. `WS-C2960S-48FPS-L` (skips matches) |
 | `--exclude-device NAME` | hostname (short or full) or management IP |
 | `--exclude-file FILE` | the same, one per line, `#` comments allowed |
 
